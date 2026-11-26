@@ -1,5 +1,6 @@
 // FILE: lib/src/ui/chats/core/dm_composer_bar.dart
 // ignore_for_file: unused_element, unused_field
+import 'package:student_platform/src/ui/learning/tabs/chat/composer/chat_composer_gate.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 
@@ -12,6 +13,8 @@ import 'package:student_platform/src/ui/learning/tabs/chat/composer.dart'
 class DmComposerBar extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
+  final String? unavailableLabel;
+  final VoidCallback? onRetryAvailability;
 
   final Message? replyTo;
   final VoidCallback onCloseReply;
@@ -43,6 +46,8 @@ class DmComposerBar extends StatelessWidget {
     super.key,
     required this.controller,
     required this.focusNode,
+    this.unavailableLabel,
+    this.onRetryAvailability,
     required this.replyTo,
     required this.onCloseReply,
     this.forwardCount = 0,
@@ -67,7 +72,7 @@ class DmComposerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themed = Theme.of(context);
-    return Column(
+    final composer = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (replyTo != null)
@@ -118,6 +123,11 @@ class DmComposerBar extends StatelessWidget {
           ),
         ),
       ],
+    );
+    return ChatComposerGate(
+      status: unavailableLabel,
+      onRetry: onRetryAvailability,
+      child: composer,
     );
   }
 }

@@ -174,8 +174,20 @@ class TeamCubit extends Cubit<TeamState> {
     }
   }
 
+  final _acknowledgingSends = <String, Message>{};
+
   @override
   void emit(TeamState next) {
+    if (_acknowledgingSends.isNotEmpty) {
+      // Keep the one optimistic bubble until the confirmed page is durable.
+      // Another refresh may see the same server ID while the write is pending.
+      final visible = <String, Message>{};
+      for (final message in next.chat) {
+        final row = _acknowledgingSends[message.id] ?? message;
+        visible[row.id] = row;
+      }
+      next = next.copyWith(chat: visible.values.toList());
+    }
     final scope = _authScope, owner = _cacheOwner;
     if (next.chat.isNotEmpty && scope != null && owner != null) {
       VerifiedEmptyTeamChats.instance.invalidate(scope, owner);
@@ -952,24 +964,46 @@ class TeamCubit extends Cubit<TeamState> {
     }
     if (!canUpdate()) return messageId;
 
-    final durableChatId = _mainChatId;
-    if (durableChatId != null) await _refreshDurableChat(durableChatId);
-    if (!canUpdate()) return sameSession() ? messageId : null;
-
-    // The server has acknowledged this send. Hydration belongs to this screen.
+    // Reconcile the exact acknowledged ID before the durable history refresh.
+    // Keep the original bubble sending until that refresh settles.
+    final chatId = _mainChatId;
+    final cached = chatId == null
+        ? state.chat
+        : ChatMessageMemoryCache.snapshot(chatId);
+    final serverRow = cached.where((row) => row.id == messageId).firstOrNull ??
+        state.chat.where((row) => row.id == messageId).firstOrNull;
+    final confirmed = serverRow ??
+        local.copyWith(
+          id: messageId,
+          chatId: chatId,
+          deliveryStatus: MessageDeliveryStatus.sent,
+          clearClientId: true,
+        );
+    _acknowledgingSends[messageId] = local;
+    var removedWhileConfirming = false;
     try {
-      final chatId = _mainChatId;
-      final cached = chatId == null ? state.chat : ChatMessageMemoryCache.snapshot(chatId);
-      final serverRow = cached.where((row) => row.id == messageId).firstOrNull ??
-          state.chat.where((row) => row.id == messageId).firstOrNull;
-      final confirmed = serverRow ?? local.copyWith(
-          id: messageId, deliveryStatus: MessageDeliveryStatus.sent, clearClientId: true);
-      emit(state.copyWith(chat: _reconcileCachedMessage(confirmed, clientId: clientId)));
+      emit(state.copyWith(
+        chat: _reconcileCachedMessage(confirmed, clientId: clientId),
+      ));
+      if (chatId != null) await _refreshDurableChat(chatId);
+    } finally {
+      removedWhileConfirming = _acknowledgingSends.remove(messageId) == null;
+    }
+    if (!canUpdate()) return sameSession() ? messageId : null;
+    if (removedWhileConfirming) return messageId;
+    final refreshed = chatId == null
+        ? state.chat
+        : ChatMessageMemoryCache.snapshot(chatId);
+    final latest = refreshed.where((row) => row.id == messageId).firstOrNull;
+    emit(state.copyWith(
+      chat: _reconcileCachedMessage(latest ?? confirmed, clientId: clientId),
+    ));
+    try {
       final serverMessage =
           await repo.loadMessageById(state.team.id, messageId);
       if (!sameSession()) return null;
       if (!canUpdate()) return messageId;
-      if (serverMessage != null) {
+      if (serverMessage != null && state.chat.any((row) => row.id == messageId)) {
         emit(state.copyWith(
           chat: _reconcileCachedMessage(serverMessage, clientId: clientId),
         ));
@@ -1172,7 +1206,9 @@ class TeamCubit extends Cubit<TeamState> {
     final message = await repo.loadMessageById(state.team.id, id);
     if (message == null || !current()) return;
 
-    emit(state.copyWith(chat: _reconcileCachedMessage(message)));
+    emit(state.copyWith(chat: _reconcileCachedMessage(
+      message, clientId: _acknowledgingSends[id]?.id,
+    )));
     await _hydrateAssignmentIdsInChat(current: current);
   }
 
@@ -1181,11 +1217,19 @@ class TeamCubit extends Cubit<TeamState> {
     final id = _messageIdFromPayload(payload);
     if (id.isEmpty) return;
 
-    if (!state.chat.any((m) => m.id == id)) return;
+    if (!_acknowledgingSends.containsKey(id) &&
+        !state.chat.any((m) => m.id == id)) return;
 
     final message = await repo.loadMessageById(state.team.id, id);
     if (message == null || !current()) return;
 
+    final pending = _acknowledgingSends[id];
+    if (pending != null) {
+      emit(state.copyWith(
+        chat: _reconcileCachedMessage(message, clientId: pending.id),
+      ));
+      return;
+    }
     final updated = List<Message>.from(state.chat);
     final idx = updated.indexWhere((m) => m.id == id);
     if (idx == -1) return;
@@ -1199,8 +1243,11 @@ class TeamCubit extends Cubit<TeamState> {
     final id = _messageIdFromPayload(payload, old: true);
     if (id.isEmpty) return;
 
-    final updated = _removeCachedMessage(id);
-    if (updated.length == state.chat.length) return;
+    final pending = _acknowledgingSends.remove(id);
+    final updated = _removeCachedMessage(id)
+        .where((message) => message.id != pending?.id)
+        .toList();
+    if (updated.length == state.chat.length && pending == null) return;
 
     emit(state.copyWith(chat: updated));
     await _hydrateAssignmentIdsInChat(current: current);
@@ -1277,6 +1324,11 @@ class TeamCubit extends Cubit<TeamState> {
             filter: filter,
             callback: (payload) async {
               safeDebugLog('[TeamCubit] RT messages UPDATE');
+              if (current() && _acknowledgingSends.containsKey(_messageIdFromPayload(payload))) {
+                await _onRealtimeMessageUpdate(payload, current);
+                await invalidateSnapshot();
+                return;
+              }
               await invalidateSnapshot();
               if (current()) await _onRealtimeMessageUpdate(payload, current);
             },
@@ -1288,6 +1340,11 @@ class TeamCubit extends Cubit<TeamState> {
             filter: filter,
             callback: (payload) async {
               safeDebugLog('[TeamCubit] RT messages DELETE');
+              if (current() && _acknowledgingSends.containsKey(_messageIdFromPayload(payload, old: true))) {
+                await _onRealtimeMessageDelete(payload, current);
+                await invalidateSnapshot();
+                return;
+              }
               await invalidateSnapshot();
               if (current()) await _onRealtimeMessageDelete(payload, current);
             },

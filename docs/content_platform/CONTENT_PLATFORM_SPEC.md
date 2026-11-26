@@ -404,12 +404,10 @@ Match rules:
 3. If **any** junction row exists → junctions are the **sole** match source (legacy columns ignored for matching). Match = group membership OR explicit user.
 4. Eligibility uniform everywhere: active user + active non-ended enrollment. Blocked / transferred / unknown / unenrolled never match.
 
-The student home carousel opens the complete news feed through «Все новости».
-The archive reads `get_my_published_news_page(p_limit, p_after)` and follows
-the published display order by sort order, priority, publication time and UUID.
-Each page checks the caller’s current audience. The reader opens the same
-publication UUID from either surface. Older servers supply the archive through
-the existing zero-argument `get_my_published_news()` RPC.
+The student opens the news reader by tapping a card on the home carousel.
+The reader opens the selected publication UUID and lets the student swipe
+through the rest of the authorized feed. The home screen refreshes the feed
+through `get_my_published_news()`.
 
 **Transactional `admin_set_news_audience`** (`content.write`, draft-only, locks row + `expected_version`):
 

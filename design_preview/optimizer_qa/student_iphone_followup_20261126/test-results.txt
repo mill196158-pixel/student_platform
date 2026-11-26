@@ -1,0 +1,92 @@
+Native project chat
+PASS ordinary login, materials, actual course assessment, exact team, native PDF and SHA-256
+PASS 036 two system Back requests restored the original files tab then the original course, with one route each
+PASS iPhone follow-up: list and forward open the same writable team with the composer at the same bottom edge
+PASS iPhone follow-up: composer denied, existing short team history readable
+00:14 +1: All tests passed!
+PASS cleanup of isolated projectchat schema, REST container and test accounts
+
+Chat restart, exact acknowledgement
+PASS 025 portrait 390x570 empty state has a single writing entry point
+00:10 +1: All tests passed!
+PASS 021 new process opened material and restored middle sequence 59, 60, 61 without HTTP in 4921 ms; pid=40868
+PASS 027 same subject title in two semesters: both histories restored independently
+PASS 025 known empty conversation distinguished after process restart
+PASS 026 absent saved conversation on second process; real messages appear with connectivity and online route
+00:09 +1: All tests passed!
+
+Durable acknowledgement
+00:04 +1: All tests passed!
+PASS 022 unique server-confirmed own message restored offline pid=1628
+00:02 +1: All tests passed!
+
+Timetable and students in different academic groups
+E2E-052 PASS two active academic groups without a subgroup roster: both signed-in students saw only their own Friday lesson on screen and in the diary RPC.
+E2E-058 PASS times, rooms and distinct lesson links verified
+E2E-060 PASS December to January via next-week and correct subject IDs and academic term
+E2E-051 same linked offering across both weeks; changed room in timetable
+E2E-053 normalized imported name opens the linked subject offering
+E2E-054 two similarly named disciplines open distinct subject cards
+E2E-035 PASS system back from next-week chat kept the selected week, date and lesson
+E2E-031 PASS renamed discipline and team, schedule and active Teams list led to same UUID and message
+E2E-056 PASS old date empty, same lesson and same subject on new date
+E2E-069 PASS previous instructor retains vote, changed practice opens unrated replacement
+E2E-057 PASS replacement applies only to the changed lesson
+E2E-055 PASS official RPC assigned reviewed plan, one student course remains, existing chat history visible
+E2E-059 changed enrollment opens the new offering while peer keeps previous one
+00:58 +10: All tests passed!
+PASS cleanup of isolated timetable schema, REST container and test accounts
+
+Teacher rating with two independent sessions
+E2E-068 PASS session first: independently opened UI picker, final own score 5, exactly one vote
+00:05 +1: All tests passed!
+E2E-068 PASS session second: independently opened UI picker, final own score 5, exactly one vote
+00:06 +1: All tests passed!
+PASS cleanup of isolated teachers schema, REST container and test accounts
+
+Native diary and tasks
+PASS iPhone diary search keeps query and result on outside touch and Done; two task tabs preserve saved completed task
+E2E-072 PASS same own task UUID moved from today to first of next month and appears once in calendar
+E2E-079 APP PASS push payload opened allowed assignment, two system returns left month-end selected twice
+E2E-080 APP PASS last day in background to new month: active tasks changed sections without duplicates
+PASS diary account change during pending cache save cannot return former student data
+00:29 +1: All tests passed!
+PASS cleanup of isolated diary schema, REST container and test accounts
+
+Native jobs board
+00:51 +11: E2E-085 two identical vacancy titles reveal their own contacts
+00:57 +12: E2E-087 closing an offer removes it after returning to the board
+01:01 +13: E2E-088 applications with identical names remain separate after editing
+01:17 +14: E2E-089 contact request can be retried when the connection returns
+01:20 +15: E2E-090 submitted Cyrillic title and multiline address are readable after login
+01:34 +17: All tests passed!
+PASS cleanup of isolated vacancy schema, REST container and test accounts
+
+Home, Base, notifications, profile and DWG regression
+00:29 +82 ~1: All tests passed!
+
+Student UI regression
+00:10 +172: All tests passed!
+
+Card position, scope and message reconciliation regression
+00:13 +55: All tests passed!
+
+Chat menus, composer and forwarding regression
+00:27 +10: All tests passed!
+
+Native home news
+PASS E2E-082 two matching titles opened distinct illustrated publications
+PASS E2E-084 failed image request permits reading and return
+PASS E2E-081 home feed opens the same publication with revised title and body without a separate button
+PASS E2E-083 swiped two feed cards, kept 27 rows during transport failure, then refreshed with one new ID and preserved order
+PASS stale home news tap ignored after account change
+PASS foreign audience hidden for first account, second account opened its own publication
+00:16 +1: All tests passed!
+PASS cleanup of isolated news schema, REST container and test accounts
+
+Two test accounts, send and receive
+PASS iPhone chat note 4: one composer in empty chat, first send and one server row
+PASS iPhone chat note 3: one bubble and one server row after delayed acknowledgement and reopening
+PASS iPhone chat note 3: two deliberate sends with identical text retain two server IDs
+00:13 +1: All tests passed!
+PASS restored original local Realtime publication and replica identity

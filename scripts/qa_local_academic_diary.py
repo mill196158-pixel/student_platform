@@ -172,7 +172,11 @@ if __name__ == "__main__":
             return ddl, dict(values, backlog=True, secondLesson=str(uuid4()))
         sys.exit(run_suite("diary", backlog_setup, "integration_test/ordinary_academic_diary_local_test.dart",
                            "STUDENT_DIARY_LOCAL", student_count=3,
-                           phases=("deadline",) if args.deadline else ("create","restart","deadline")))
+                           phases=("deadline",) if args.deadline else ("create","restart","deadline"),
+                           required_markers=(
+                               "PASS iPhone diary search keeps query", "E2E-072 PASS",
+                               "E2E-079 APP PASS", "E2E-080 APP PASS",
+                           ) if args.deadline else ()))
     planner = args.planner
     sys.exit(run_suite("diary", planner_setup if planner else setup,
                        "integration_test/ordinary_academic_diary_local_test.dart",

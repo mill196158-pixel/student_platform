@@ -75,7 +75,8 @@ void main() {
   });
   Widget app(Widget home, bool dark, {double inset = 0}) => MaterialApp(
       theme: ProductTheme.build(
-          brightness: dark ? Brightness.dark : Brightness.light),
+              brightness: dark ? Brightness.dark : Brightness.light)
+          .copyWith(platform: TargetPlatform.iOS),
       builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(
               textScaler: TextScaler.linear(1.5),
@@ -109,12 +110,27 @@ void main() {
     await tester.scrollUntilVisible(find.text('Записей пока нет.'), 100,
         scrollable: entries);
     expect(find.text('Записей пока нет.'), findsOneWidget);
-    await tester.enterText(find.byType(TextField), 'нет совпадений');
+    final search = find.byType(TextField);
+    await tester.enterText(search, 'нет совпадений');
     await tester.pumpAndSettle();
+    final input = tester.widget<EditableText>(find.byType(EditableText));
+    expect(input.focusNode.hasFocus, isTrue);
+    await tester.tapAt(tester.getTopLeft(search) +
+        Offset(-8, tester.getSize(search).height / 2));
+    await tester.pump();
+    expect(input.focusNode.hasFocus, isFalse);
+    expect(input.controller.text, 'нет совпадений');
     await tester.scrollUntilVisible(
         find.text('По запросу ничего не найдено.'), 100,
         scrollable: entries);
     expect(find.text('По запросу ничего не найдено.'), findsOneWidget);
+
+    await tester.tap(search);
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(input.focusNode.hasFocus, isFalse);
+    expect(input.controller.text, 'нет совпадений');
     expect(repo.writes, 0);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());

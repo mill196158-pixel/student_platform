@@ -388,7 +388,7 @@ void main() {
       if (!offline) {
         final entry = find.descendant(
             of: find.byType(TeamDetailsScreen),
-            matching: find.byType(EditableText));
+            matching: find.byType(EditableText)).hitTestable();
         await wait(entry);
         await tester.enterText(entry.first, text);
         await tester.pump();
@@ -514,21 +514,15 @@ void main() {
       await openDirect('empty', offline);
       await wait(find.text('Сообщений пока нет'));
       if (!offline) {
-        final write = find.text('Написать');
-        await tester.ensureVisible(write);
-        await tester.pump();
-        expect(write.hitTestable(), findsOneWidget);
+        expect(find.text('Написать'), findsNothing);
         expect(tester.getSize(find.byType(Scaffold).last).width, 390);
-        await tester.tap(write);
+        final composer = find.byType(EditableText).last;
+        await wait(composer);
+        expect(composer.hitTestable(), findsOneWidget);
+        await tester.tap(composer);
         await tester.pump();
-        expect(
-            tester
-                .widget<EditableText>(find.byType(EditableText).last)
-                .focusNode
-                .hasFocus,
-            isTrue);
-        print(
-            'PASS 025 portrait 390x570 empty state scrolls and Write focuses real composer');
+        expect(tester.widget<EditableText>(composer).focusNode.hasFocus, isTrue);
+        print('PASS 025 portrait 390x570 empty state has a single writing entry point');
         await tester.binding.setSurfaceSize(null);
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();

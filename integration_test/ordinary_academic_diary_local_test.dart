@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
@@ -18,6 +20,7 @@ import 'package:student_platform/src/ui/learning/assignment_details_screen.dart'
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
 import 'package:student_platform/src/ui/schedule/schedule_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_ui/student_ui.dart' show ProductTheme;
 
 import 'support/local_schema_http_client.dart';
 
@@ -235,21 +238,102 @@ void main() {
         expect(rows.single['status'], 'todo');
         expect(displayDate(DateTime.parse(rows.single['due_at'])),
             displayDate(next));
+        const doneTitle = 'Проверенный расчёт сети';
+        final service = PersonalDiaryService();
+        final doneTask = await service.createPersonalTask(title: doneTitle);
+        expect(doneTask.id.startsWith('local-'), isFalse);
+        await service.updatePersonalTaskStatus(
+            taskId: doneTask.id, status: 'done');
+        expect(
+            (await tasks
+                .select('status')
+                .eq('id', doneTask.id)
+                .single())['status'],
+            'done');
+
+        final screenshot = GlobalKey();
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(390, 844);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(MaterialApp(
+          key: UniqueKey(),
+          debugShowCheckedModeBanner: false,
+          theme: ProductTheme.build().copyWith(platform: TargetPlatform.iOS),
+          builder: (_, child) => RepaintBoundary(key: screenshot, child: child),
+          home: const PersonalDiaryScreen(),
+        ));
+        final diarySearch = field(hint: 'Поиск по дневнику');
+        Finder tasksTab(String label) => find.descendant(
+            of: find.byWidgetPredicate((widget) => widget is SegmentedButton),
+            matching: find.text(label));
+        Future<void> capture(String file) async {
+          final out = Platform.environment['STUDENT_DIARY_EVIDENCE'];
+          if (out == null) return;
+          final boundary = screenshot.currentContext!.findRenderObject()
+              as RenderRepaintBoundary;
+          final image = await boundary.toImage();
+          try {
+            final png = await image.toByteData(format: ui.ImageByteFormat.png);
+            await File('$out/$file.png')
+                .writeAsBytes(png!.buffer.asUint8List());
+          } finally {
+            image.dispose();
+          }
+        }
+
+        await waitFor(diarySearch);
+        await tester.enterText(diarySearch, 'boundary task');
+        await waitFor(find.text(title));
+        final input = tester.widget<EditableText>(find.byType(EditableText));
+        expect(input.focusNode.hasFocus, isTrue);
+        await tester.tapAt(Offset(6, tester.getCenter(diarySearch).dy));
+        await animate();
+        expect(input.focusNode.hasFocus, isFalse);
+        expect(input.controller.text, 'boundary task');
+        expect(find.text(title), findsOneWidget);
+        expect(find.text(doneTitle), findsNothing);
+        await tester.tap(diarySearch);
+        await animate();
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await animate();
+        expect(input.focusNode.hasFocus, isFalse);
+        expect(input.controller.text, 'boundary task');
+        await capture('active-search');
+        await tap(find.byTooltip('Очистить поиск'));
+        await tap(tasksTab('Готово'));
+        await waitFor(find.text(doneTitle));
+        expect(find.text(title), findsNothing);
+        expect(find.text('История'), findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.drag(find.byType(ListView).first, const Offset(0, 900));
+        await animate();
+        await capture('completed');
+        await tap(tasksTab('В работе'));
+        await waitFor(find.text(title));
+        expect(find.text(doneTitle), findsNothing);
+        debugPrint(
+            'PASS iPhone diary search keeps query and result on outside touch and Done; two task tabs preserve saved completed task');
+
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
         await tester.pumpWidget(
             MaterialApp(key: UniqueKey(), home: const PersonalDiaryScreen()));
+        await animate();
         await tap(find.byIcon(Icons.add_rounded));
         await tap(find.text('Календарь дневника'));
         await waitFor(find.byType(GridView));
-        Finder calendarDay(int day) => find.descendant(
-            of: find.byType(GridView), matching: find.text('$day'));
-        await tap(calendarDay(today.day).first);
+        Finder calendarDay(DateTime day) => find.descendant(
+            of: find.byType(GridView),
+            matching: find.byKey(ValueKey<DateTime>(DateUtils.dateOnly(day))));
+        await tap(calendarDay(today));
         await waitFor(find.text('События на ${displayDate(today)}'));
         final calendar = find.byType(BottomSheet);
         expect(find.descendant(of: calendar, matching: find.text(title)),
             findsNothing);
         await tap(find.descendant(
             of: calendar, matching: find.byIcon(Icons.chevron_right_rounded)));
-        await tap(calendarDay(1).first);
+        await tap(calendarDay(next));
         await waitFor(find.text('События на ${displayDate(next)}'));
         expect(find.descendant(of: calendar, matching: find.text(title)),
             findsOneWidget);

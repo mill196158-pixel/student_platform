@@ -256,7 +256,8 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('network error stays visible during retry and a recovered card appears', (tester) async {
+  testWidgets('unconfirmed card stays hidden offline and appears after reconnect',
+      (tester) async {
     await initializeDateFormatting('ru');
     final previous = StrictChatCardLoader.instance;
     final loader = _SequenceCardLoader();
@@ -284,18 +285,103 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump();
-    expect(find.text('Не удалось загрузить карточку'), findsOneWidget);
-    await tester.tap(find.text('Не удалось загрузить карточку'));
+    expect(find.text('Не удалось загрузить карточку'), findsNothing);
+    expect(find.text('28 июля 2026'), findsNothing);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
     await tester.pump();
     expect(loader.calls, hasLength(2));
-    expect(find.text('Не удалось загрузить карточку'), findsOneWidget);
+    expect(find.text('Не удалось загрузить карточку'), findsNothing);
     loader.calls.last.complete(const ChatActionCardEntry(kind: 'collection', entityId: 'entity',
       available: true, status: 'open', title: 'Актуальная карточка'));
+    await tester.pump();
     await tester.pump();
     await tester.pump();
     expect(find.text('Актуальная карточка'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a newly verified card keeps a visible history message in place',
+      (tester) async {
+    await initializeDateFormatting('ru');
+    SharedPreferences.setMockInitialValues({});
+    await tester.runAsync(() => Supabase.initialize(
+        url: 'https://example.test', publishableKey: 'test',
+        authOptions: const FlutterAuthClientOptions(autoRefreshToken: false)));
+    addTearDown(() async => Supabase.instance.dispose());
+    final previous = StrictChatCardLoader.instance;
+    final loader = _DelayedCardCache();
+    StrictChatCardLoader.instance = loader;
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('test-user');
+    final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final controller = ScrollController();
+    final search = ChatSearchController();
+    addTearDown(() async {
+      StrictChatCardLoader.instance = previous;
+      controller.dispose();
+      search.dispose();
+      await events.close();
+    });
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 640);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final messages = [
+      for (var n = 0; n < 48; n++)
+        Message(id: 'normal-$n', chatId: 'chat', authorId: 'other',
+            authorLogin: '', authorName: 'Друг', text: 'Реплика $n',
+            at: DateTime(2026, 7, 28, 2, n)),
+      _message(kind: 'collection', entity: 'entity')
+          .copyWith(at: DateTime(2026, 7, 28, 3)),
+    ];
+    await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.iOS),
+        home: AuthSessionScopeHost(
+          createScope: () => scope,
+          child: Scaffold(body: ChatMessageList(
+            messages: messages, controller: controller, messageKeys: {},
+            search: search, currentUserId: 'test-user',
+            onReply: (_) {}, onLongPress: (_, __, ___, ____, _____, ______) {},
+            onReplyTap: (_) {}, onReact: (_, __) {}, selectingMessages: false,
+            selectedMessageIds: const {}, onToggleSelect: (_) {},
+            canModerateCollection: false, canDeleteGroupAction: false,
+          )),
+        )));
+    await tester.pump();
+    controller.jumpTo(controller.position.maxScrollExtent * .52);
+    await tester.pump();
+    final visible = find
+        .textContaining('Реплика ')
+        .hitTestable()
+        .evaluate()
+        .where((element) => element.widget is Text)
+        .map((element) => (element.widget as Text).data!)
+        .toList();
+    expect(visible, isNotEmpty);
+    final anchor = find.text(visible[visible.length ~/ 2]);
+    final before = tester.getCenter(anchor).dy;
+    final extent = controller.position.maxScrollExtent;
+
+    loader.result.complete(const ChatActionCardEntry(
+      kind: 'group_collection', entityId: 'entity', available: true,
+      status: 'open', title: 'Проверенный сбор',
+      purpose: 'Длинное описание, которое увеличивает высоту карточки.',
+    ));
+    for (var n = 0; n < 5; n++) {
+      await tester.pump();
+    }
+    expect(controller.position.maxScrollExtent, greaterThan(extent + 64));
+    expect(tester.getCenter(anchor).dy, closeTo(before, 1));
+    controller.jumpTo(0);
+    await tester.pump();
+    expect(find.text('Проверенный сбор'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('card mounted before initialSession becomes visible when scope is ready', (tester) async {

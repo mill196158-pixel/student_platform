@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'news_archive_screen.dart';
 import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/core/qa_no_automatic_writes.dart';
 import 'dart:typed_data';
@@ -72,8 +71,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final AppNotificationsApi _notificationsApi =
       widget.notificationsApi ?? AppNotificationsApi();
 
-  VoidCallback? _checkNewsArchive;
-  bool _leavingHome = false;
   HomeDashboardData? _data;
   HomePromoLoadResult _promo =
       const HomePromoLoadResult(intentionallyEmpty: true);
@@ -208,7 +205,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _promoLoadGeneration++;
     }
     _authScope = source;
-    _checkNewsArchive?.call();
     _authScope?.addListener(_onAuthScopeChanged);
     _ownsService = widget.dashboardService == null;
     _service =
@@ -257,7 +253,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _checkNewsArchive?.call();
     final contentChanged = !identical(oldWidget.homeContent, widget.homeContent) ||
         !identical(oldWidget.homeContentCapabilities, widget.homeContentCapabilities);
     if (contentChanged) {
@@ -326,8 +321,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    _leavingHome = true;
-    _checkNewsArchive?.call();
     WidgetsBinding.instance.removeObserver(this);
     widget.activeListenable?.removeListener(_queuePromoImpressions);
     widget.homeContent?.removeListener(_onContentAccessChanged);
@@ -745,6 +738,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
     if (data == null) return const SizedBox.shrink();
+    final newsUser = _loadUserId;
+    final newsOwner = _loadAuthScope;
     _queuePromoImpressions();
 
     if (!data.isScheduleForToday && !_loading) {
@@ -780,9 +775,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onRefresh: _load,
               onNotificationsTap:
                   widget.cachedReader == null ? _openNotifications : null,
-              onNewsTap: (index) => _showNewsFeed(data.news, index),
-              onAllNewsTap: widget.cachedReader == null && _service.currentUserId != null
-                  ? _openNewsArchive : null,
+              onNewsTap: (index) => _showNewsFeed(data.news, index,
+                  userId: newsUser, owner: newsOwner),
               onSummaryTap: () => MainTabScope.switchToTab(
                 context,
                 MainTab.schedule,
@@ -1149,87 +1143,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _openNewsArchive() async {
-    final service = _service, uid = service.currentUserId;
-    final scope = _authScope, owner = scope?.capture();
-    final barrier = widget.onlineBarrier, content = widget.homeContent;
-    bool current() => mounted && !_leavingHome && uid != null && service.currentUserId == uid &&
-        identical(service, _service) && identical(scope, _authScope) &&
-        (scope == null || owner != null && scope.isCurrent(owner)) &&
-        widget.cachedReader == null && identical(barrier, widget.onlineBarrier) &&
-        (barrier?.isOpen ?? true) && identical(content, widget.homeContent) &&
-        content?.isDenied('news') != true;
-    if (!current() || _checkNewsArchive != null) return;
-    final navigator = Navigator.of(context);
-    late MaterialPageRoute<void> route;
-    final active = ValueNotifier(true);
-    void check() {
-      if (current()) return;
-      void close() {
-        if (active.value) active.value = false;
-        if (navigator.mounted && route.isActive) navigator.removeRoute(route);
-      }
-      if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => close());
-      } else {
-        close();
-      }
-    }
-    route = MaterialPageRoute<void>(
-      settings: const RouteSettings(name: '/news'),
-      builder: (_) => ValueListenableBuilder<bool>(
-        valueListenable: active,
-        builder: (context, valid, child) => !valid || !current() ? const SizedBox.shrink()
-          : NewsArchiveScreen(
-              load: (cursor) async {
-                if (!current()) throw HomeLoadCancelled();
-                Future<PublishedNewsPage> read() =>
-                    service.readNewsPage(cursor, current: current);
-                final page = barrier == null ? await read() : await barrier.run(read);
-                if (page == null || !current()) throw HomeLoadCancelled();
-                return page;
-              },
-              open: (item) {
-                if (current()) unawaited(_showNewsFeed([item], 0));
-              },
-            ),
-      ),
-    );
-    _checkNewsArchive = check;
-    final removeClose = barrier?.onClose(check);
-    scope?.addListener(check);
-    content?.addListener(check);
-    try {
-      final closed = navigator.push(route);
-      check();
-      await closed;
-    } finally {
-      removeClose?.call();
-      scope?.removeListener(check);
-      content?.removeListener(check);
-      _checkNewsArchive = null;
-      // The outgoing route still builds while its transition runs.
-      unawaited(route.completed.then((_) => active.dispose()));
-    }
-  }
-
-  Future<void> _showNewsFeed(List<HomeNewsItem> news, int initialIndex) async {
-    if (!_cachedContentAllowed) return;
-    if (news.isEmpty) return;
+  Future<void> _showNewsFeed(List<HomeNewsItem> news, int initialIndex,
+      {required String? userId, required AuthOperationScope? owner}) async {
+    if (!_cachedContentAllowed || news.isEmpty) return;
+    final service = _service;
+    final scope = _authScope;
+    if (service.currentUserId != userId ||
+        (scope != null && (owner == null || !scope.isCurrent(owner)))) return;
     final reader = widget.cachedReader;
     final barrier = widget.onlineBarrier;
     final content = widget.homeContent;
     final contentCaps = widget.homeContentCapabilities;
     final contentPermit = _contentPermit;
-    final scope = _authScope;
-    final owner = scope?.capture();
     List<HomeNewsItem> checked;
     try {
-      checked = await _service.validateNewsImages(news).timeout(const Duration(seconds: 1));
+      checked = await service.validateNewsImages(news).timeout(const Duration(seconds: 1));
     } catch (_) {
       checked = news.map((item) => item.copyWith(clearImageBytes: true)).toList();
     }
-    if (!mounted || !identical(widget.cachedReader, reader) ||
+    if (!mounted ||
+        !identical(_service, service) ||
+        service.currentUserId != userId ||
+        !identical(widget.cachedReader, reader) ||
         !identical(widget.onlineBarrier, barrier) ||
         !identical(widget.homeContent, content) ||
         !identical(widget.homeContentCapabilities, contentCaps) ||
@@ -1245,6 +1180,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ModalBottomSheetRoute<void>? sheetRoute;
     bool current() =>
         mounted &&
+        identical(_service, service) &&
+        service.currentUserId == userId &&
         identical(widget.cachedReader, reader) &&
         identical(widget.onlineBarrier, barrier) &&
         identical(widget.homeContent, content) &&
@@ -1255,23 +1192,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         (scope == null || (owner != null && scope.isCurrent(owner))) &&
         content?.isDenied('news') != true;
     void check() {
-      if (!current()) {
+      if (current()) return;
+      void close() {
+        final target = sheetRoute;
+        if (target == null || !target.isActive) return;
         active.value = false;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final target = sheetRoute;
-          if (target != null && target.isActive && navigator.mounted) {
-            navigator.removeRoute(target);
-          }
-        });
+        if (navigator.mounted) {
+          navigator.removeRoute(target);
+        }
+      }
+      if (SchedulerBinding.instance.schedulerPhase ==
+          SchedulerPhase.persistentCallbacks) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => close());
+      } else {
+        close();
       }
     }
 
     void mark(String id, {bool closed = false}) {
       if (!current()) return;
       if (barrier == null) {
-        unawaited(_service.markNewsSeen(id, closed: closed));
+        unawaited(service.markNewsSeen(id, closed: closed));
       } else {
-        unawaited(barrier.run(() => _service.markNewsSeen(id, closed: closed)));
+        unawaited(barrier.run(() => service.markNewsSeen(id, closed: closed)));
       }
     }
 
@@ -1301,7 +1244,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       final source = byId[item.id];
                       if (source == null) return item.imageBytes;
                       final bytes =
-                          await _service.resolveNewsImageBytes(source);
+                          await service.resolveNewsImageBytes(source);
                       return current() ? bytes : null;
                     }
                   : null,
@@ -1323,9 +1266,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 : const SizedBox.shrink());
       },
     );
-    final route = navigator.push(sheetRoute);
+    unawaited(navigator.push(sheetRoute));
     if (!current()) check();
-    unawaited(route.whenComplete(() {
+    unawaited(sheetRoute.completed.whenComplete(() {
       removeClose?.call();
       scope?.removeListener(check);
       reader?.accessChanges.removeListener(check);

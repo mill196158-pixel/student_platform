@@ -122,14 +122,18 @@ void main() {
     final header =
         () => tester.widget<StudentInfoHeader>(find.byType(StudentInfoHeader));
     expect(header().subtitle, 'каталог предметов');
-    header().onInfoTap();
+    await tester.tap(find.byTooltip('О разделе').hitTestable());
     expect(accountCalls, 1);
+    final search = find.byType(EditableText);
+    await tester.tap(search);
+    await tester.pumpAndSettle();
+    expect(tester.widget<EditableText>(search).focusNode.hasFocus, isTrue);
     for (final pair in [
       ('Справочный раздел', 'справочный раздел'),
       ('Вакансии', 'работа и стажировки'),
       ('Предметы', 'каталог предметов')
     ]) {
-      header().onSectionTap();
+      await tester.tap(find.byTooltip('Выбрать раздел').hitTestable());
       await tester.pumpAndSettle();
       expect(find.text('Предметы'), findsOneWidget);
       expect(find.text('Справочный раздел'), findsOneWidget);
@@ -137,6 +141,7 @@ void main() {
       await tester.tap(find.text(pair.$1));
       await tester.pumpAndSettle();
       expect(header().subtitle, pair.$2);
+      expect(tester.widget<EditableText>(search).focusNode.hasFocus, isFalse);
       expect(accountCalls, 1);
     }
     expect(find.text('Производная: правило произведения'), findsNothing);

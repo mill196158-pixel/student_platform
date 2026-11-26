@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -85,6 +87,60 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     InfoScreen.debugClearMemoryCache();
+  });
+
+  testWidgets(
+      'phone Base opens reference and jobs while the study plan is pending',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.padding = const FakeViewPadding(top: 59, bottom: 34);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetPadding);
+
+    final plan = Completer<InfoPlanState>();
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(platform: TargetPlatform.iOS),
+      home: InfoScreen(
+        debugUserId: 'user-a',
+        planLoader: () => plan.future,
+        vacancyService: VacancyService(
+          rpcClient: _FakeVacancyRpc(response: []),
+          currentUserId: () => 'user-a',
+        ),
+        referenceService: _testReferenceService(),
+      ),
+    ));
+
+    Future<void> frames() async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+    }
+
+    Future<void> select(String title, {double side = .5}) async {
+      await tester.tap(find.byTooltip('Выбрать раздел').hitTestable());
+      await frames();
+      final row = find.widgetWithText(ListTile, title).hitTestable();
+      final bounds = tester.getRect(row);
+      await tester
+          .tapAt(Offset(bounds.left + bounds.width * side, bounds.center.dy));
+      await frames();
+    }
+
+    await select('Справочный раздел', side: .14);
+    expect(find.text('Справочная информация').hitTestable(), findsOneWidget);
+    await select('Вакансии', side: .9);
+    expect(find.text('Вакансии пока пусты').hitTestable(), findsOneWidget);
+    await select('Предметы');
+    plan.complete(_emptyPlan());
+    await tester.pumpAndSettle();
+    expect(
+        find.text('Предметы учебного плана пока не найдены'), findsOneWidget);
+    await tester.tap(find.byTooltip('О разделе').hitTestable());
+    await tester.pumpAndSettle();
+    expect(find.text('Что внутри раздела'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   for (final titleFilled in [false, true]) {

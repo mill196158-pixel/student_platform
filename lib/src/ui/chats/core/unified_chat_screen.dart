@@ -2603,11 +2603,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                               _composerCaps?.canEditOwnBeforeActivity,
                           onRetryFailedText:
                               isDm ? (m) => unawaited(_retryFailedDm(m)) : null,
-                          onFocusComposer: () {
-                            _composerFocus.requestFocus();
-                            services.SystemChannels.textInput
-                                .invokeMethod('TextInput.show');
-                          },
                           onAttachFile: () async {
                             if (!_canComposeDm) return;
                             final file = await _fileService.pickFile();
@@ -2707,35 +2702,23 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                         busy: _blockActionBusy || _chatInitializing,
                         onUnblock: _iBlockedPeer ? _unblockPeerFromDm : null,
                       )
-                    : (isDm && _draftOwnerDm != null && !_draftOwnerDm!.canRead)
-                        ? const SafeArea(child: Padding(padding: EdgeInsets.all(12),
-                            child: Text('Сессия изменилась. Откройте чат заново.')))
-                    : (isDm && !_dmComposerReady)
-                        ? SafeArea(
+                    : (isDm && _draftOwnerDm?.canRead == false)
+                        ? const SafeArea(
                             child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: _chatInitializationFailed
-                                  ? TextButton(
-                                      onPressed: _initializeChat,
-                                      child: const Text(
-                                          'Не удалось открыть чат. Повторить'),
-                                    )
-                                  : const Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: ProductLoadingIndicator()),
-                                        SizedBox(width: 12),
-                                        Text('Подключение к чату…'),
-                                      ],
-                                    ),
+                              padding: EdgeInsets.all(12),
+                              child: Text('Сессия изменилась. Откройте чат снова.'),
                             ),
                           )
-                        : (isDm)
+                        : isDm
                             ? DmComposerBar(
+                                unavailableLabel: _canComposeDm
+                                    ? null
+                                    : _chatInitializationFailed
+                                        ? 'Не удалось открыть чат. Повторить'
+                                        : 'Подключение к чату…',
+                                onRetryAvailability: _chatInitializationFailed
+                                    ? _initializeChat
+                                    : null,
                                 controller: _ctrl,
                                 focusNode: _composerFocus,
                                 replyTo: _replyTo,

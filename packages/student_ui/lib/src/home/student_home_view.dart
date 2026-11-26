@@ -52,7 +52,6 @@ class StudentHomeView extends StatelessWidget {
     this.onRefresh,
     this.onNotificationsTap,
     this.onNewsTap,
-    this.onAllNewsTap,
     this.onSummaryTap,
     this.onGroupActionTap,
     this.onGroupActionDelete,
@@ -79,7 +78,6 @@ class StudentHomeView extends StatelessWidget {
   final Future<void> Function()? onRefresh;
   final VoidCallback? onNotificationsTap;
   final ValueChanged<int>? onNewsTap;
-  final VoidCallback? onAllNewsTap;
   final VoidCallback? onSummaryTap;
   final ValueChanged<StudentHomeGroupAction>? onGroupActionTap;
   final ValueChanged<StudentHomeGroupAction>? onGroupActionDelete;
@@ -165,19 +163,6 @@ class StudentHomeView extends StatelessWidget {
         ),
         _sectionSpacer,
         // System block: news (immovable).
-        if (onAllNewsTap != null)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: onAllNewsTap,
-                  child: const Text('Все новости'),
-                ),
-              ),
-            ),
-          ),
         if (data.news.isNotEmpty) ...[
           SliverToBoxAdapter(
             child: _AnimatedEntry(

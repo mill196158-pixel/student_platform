@@ -99,6 +99,17 @@ class DraftSessionSeed {
   Future<void> get ready => _scope.ready;
   bool get sameEpoch => _scope.generation == _generation && !_scope.logoutFenced;
 
+  /// A route may reserve input space before the scope is ready, provided the
+  /// SDK still has the exact user and session captured when the route opened.
+  bool get matchesCurrentIdentity {
+    if (!sameEpoch || !identical(_client, Supabase.instance.client)) return false;
+    final session = _client.auth.currentSession;
+    if (session == null) return false;
+    final binding = OfflineSessionBinding.fromSession(session, '$_project/auth/v1');
+    return binding != null && binding.userId == _userId &&
+        binding.sessionId == _sessionId;
+  }
+
   DraftSessionOwner? confirm() {
     try {
       if (_scope.generation != _generation || _scope.logoutFenced ||

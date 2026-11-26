@@ -24,6 +24,9 @@ import 'package:student_platform/src/ui/learning/widgets/offline_assignment_bubb
 import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/search/chat_search_controller.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_card_envelope.dart';
+import 'tabs/chat/data/chat_action_cards_cache.dart';
+import 'tabs/chat/data/saved_chat_card_previews.dart';
+import 'tabs/chat/topics/topic_selection_card.dart';
 
 import 'models/team.dart';
 import 'state/team_cubit.dart';
@@ -157,7 +160,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
   final _keys = <String, GlobalKey>{};
   DmChatService? _filePermit;
   CapabilityPermit? _permit;
-  Future<List<Message>?>? _messages;
+  Future<(List<Message>, Map<ChatCardIdentity, ChatActionCardEntry>)?>? _messages;
   Future<List<Assignment>?>? _assignments;
   Future<String?>? _draftText;
   int _revision = 0;
@@ -184,9 +187,14 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
           capabilities: caps,
           cacheReader: (_, __) async => throw const CachedChatUnavailable());
       _permit = permit;
-      _messages = widget.store.read(widget.chatId, caps);
+      final store = widget.store, chatId = widget.chatId;
+      _messages = store.read(chatId, caps).then((messages) async {
+        if (messages == null) return null;
+        final previews = await SavedChatCardPreviews(store).read(chatId, messages, caps);
+        return (messages, previews);
+      });
       _assignments = OfflineAssignmentStore(widget.store).read(widget.team.id, caps);
-      final store = widget.store, binding = store.currentBinding();
+      final binding = store.currentBinding();
       final owner = store.scope.capture();
       final revision = _revision;
       if (owner != null && binding != null && owner.userId == binding.userId) {
@@ -279,7 +287,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
           Expanded(
               child: TabBarView(controller: _tabs, children: [
             const Center(child: Text('Сохранённые задания недоступны.')),
-            Column(children: [Expanded(child: FutureBuilder<List<Message>?>(
+            Column(children: [Expanded(child: FutureBuilder<(List<Message>, Map<ChatCardIdentity, ChatActionCardEntry>)?>(
                 key: ValueKey(_revision),
                 future: _messages,
                 builder: (context, snapshot) {
@@ -292,8 +300,10 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                     return const Center(
                         child: Text('Сохранённые сообщения недоступны.'));
                   }
-                  final messages = snapshot.data!
+                  final (cachedMessages, previews) = snapshot.data!;
+                  final messages = cachedMessages
                       .where((m) =>
+                          previews.containsKey(chatActionCardIdentity(m)) ||
                           m.type == MessageType.assignmentDraft ||
                           m.type == MessageType.assignmentPublished ||
                           ((m.cardKind?.trim().isEmpty ?? true) &&
@@ -301,7 +311,7 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                       .toList();
                   if (messages.isEmpty)
                     return Center(
-                        child: Text(snapshot.data!.isEmpty
+                        child: Text(cachedMessages.isEmpty
                             ? 'Сообщений пока нет'
                             : 'Часть сообщений пока недоступна офлайн.'));
                   return FutureBuilder<List<Assignment>?>(
@@ -330,6 +340,8 @@ class _CachedTeamDetailsState extends State<_CachedTeamDetails>
                       onReplyTap: (_) {},
                       onReact: (_, __) {},
                       localOnlyBubbleBuilder: (message) {
+                        final preview = previews[chatActionCardIdentity(message)];
+                        if (preview != null) return SavedActionCardPreview(entry: preview);
                         if (message.type == MessageType.assignmentDraft ||
                             message.type == MessageType.assignmentPublished) {
                           final assignment = assignments[message.assignmentId];

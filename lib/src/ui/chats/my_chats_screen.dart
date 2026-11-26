@@ -80,6 +80,9 @@ class _MyChatsScreenState extends State<MyChatsScreen>
   List<_ChatSummary> _all = [];
   List<_ChatSummary> _visible = [];
   String _query = '';
+  String? _forwardSelection;
+  bool _resolvingForwardRecipient = false;
+
 
   RealtimeChannel? _channel; // один общий канал для списка чатов
   Timer? _reloadDebounce;
@@ -968,6 +971,90 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     return 'title:${c.title}';
   }
 
+  Future<void> _confirmForwardRecipient(_ChatSummary recipient) async {
+    if (_resolvingForwardRecipient) return;
+    final route = ModalRoute.of(context);
+    final selection = _summaryIdentity(recipient);
+    bool current() => mounted &&
+        route?.isCurrent == true &&
+        !_boundaryInvalidated &&
+        (widget.pickIsCurrent?.call() ?? false) &&
+        _forwardSelection == selection &&
+        _all.any((summary) => _summaryIdentity(summary) == selection);
+
+    if (!current()) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _resolvingForwardRecipient = true);
+    try {
+      final peerId = recipient.peerId;
+      final isDm = recipient.isDm && peerId != null && peerId.isNotEmpty;
+      String? chatId = recipient.chatId;
+      if (isDm) {
+        chatId = await resolveForwardTargetForSession(
+          current,
+          () => DmApi.getOrCreateChatId(peerId: peerId),
+        );
+      } else if (chatId == null || chatId.isEmpty) {
+        final row = await resolveForwardTargetForSession(
+          current,
+          () => Supabase.instance.client
+              .from('chats')
+              .select('id')
+              .eq('team_id', recipient.team.id)
+              .eq('type', 'team_main')
+              .limit(1)
+              .maybeSingle(),
+        );
+        chatId = row?['id']?.toString();
+      }
+      if (!current()) return;
+      final confirmedId = chatId;
+      if (confirmedId == null || confirmedId.isEmpty) {
+        throw StateError('Forward recipient unavailable');
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(
+        ForwardTarget(
+          chatId: confirmedId,
+          title: recipient.title,
+          mode: isDm ? ChatMode.dm : ChatMode.team,
+          avatarUrl: recipient.avatarUrl,
+          open: (sourceContext) async {
+            if (isDm) {
+              final team = sourceContext.read<TeamCubit>();
+              await Navigator.of(sourceContext).push(MaterialPageRoute(
+                builder: (_) => BlocProvider.value(
+                  value: team,
+                  child: DirectChatScreen(
+                    peerId: peerId,
+                    peerName: recipient.title,
+                    peerAvatarUrl: recipient.avatarUrl,
+                    initialChatId: confirmedId,
+                  ),
+                ),
+              ));
+            } else {
+              await Navigator.of(sourceContext).push(MaterialPageRoute(
+                builder: (_) => TeamDetailsScreen(
+                  team: recipient.team,
+                  initialTabIndex: 1,
+                ),
+              ));
+            }
+          },
+        ),
+      );
+    } catch (_) {
+      if (mounted && current()) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('Не удалось открыть чат для пересылки.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _resolvingForwardRecipient = false);
+    }
+  }
+
   Future<void> _openChat(_ChatSummary c) async {
     Navigator.of(context).pop();
     if (c.isDm && (c.peerId?.isNotEmpty ?? false)) {
@@ -1047,13 +1134,24 @@ class _MyChatsScreenState extends State<MyChatsScreen>
     final searchFill =
         theme.colorScheme.surfaceContainerHighest.withValues(alpha: .55);
     final dividerOpacity = isDark ? .24 : .35;
+    final selectedRecipient = widget.pickMode
+        ? _all.where((summary) => _summaryIdentity(summary) == _forwardSelection).firstOrNull
+        : null;
+
 
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: const Text('Сообщения'),
+        title: Text(widget.pickMode ? 'Переслать в чат' : 'Сообщения'),
+        leading: widget.pickMode
+            ? IconButton(
+                tooltip: 'Отмена',
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
         actions: [
-          if (!_cacheOnly)
+          if (!_cacheOnly && !widget.pickMode)
             PopupMenuButton<String>(
               tooltip: 'Ещё',
               padding: EdgeInsets.zero,
@@ -1154,6 +1252,32 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                               _ThinDivider(opacity: dividerOpacity),
                           itemBuilder: (ctx, i) {
                             final c = _visible[i];
+                            if (widget.pickMode) {
+                              final key = _summaryIdentity(c);
+                              final selected = key == _forwardSelection;
+                              return ListTile(
+                                key: ValueKey(key),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                selected: selected,
+                                selectedTileColor:
+                                    theme.colorScheme.primaryContainer.withValues(alpha: .55),
+                                selectedColor: theme.colorScheme.onPrimaryContainer,
+                                leading: Icon(c.isDm
+                                    ? Icons.person_outline_rounded
+                                    : Icons.groups_outlined),
+                                title: Text(c.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                                subtitle: Text(c.isDm ? 'Личный чат' : 'Команда'),
+                                trailing: selected ? const Icon(Icons.check_rounded) : null,
+                                onTap: _resolvingForwardRecipient
+                                    ? null
+                                    : () {
+                                        FocusScope.of(context).unfocus();
+                                        setState(() => _forwardSelection = key);
+                                      },
+                              );
+                            }
                             return KeyedSubtree(
                               key: ValueKey(c.chatId ?? c.title),
                               child: _ChatRow(
@@ -1166,93 +1290,6 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                                   }
                                   debugPrint(
                                       '[MyChatsScreen] onTap -> \'${c.title}\'');
-                                  if (widget.pickMode) {
-                                    try {
-                                      bool current() =>
-                                          mounted &&
-                                          (widget.pickIsCurrent?.call() ??
-                                              true);
-                                      if (!current()) return;
-                                      if (c.isDm &&
-                                          (c.peerId?.isNotEmpty ?? false)) {
-                                        final realId =
-                                            await resolveForwardTargetForSession(
-                                                current,
-                                                () => DmApi.getOrCreateChatId(
-                                                    peerId: c.peerId!));
-                                        if (realId == null || !current())
-                                          return;
-                                        // ignore: use_build_context_synchronously
-                                        Navigator.pop(
-                                            context,
-                                            ForwardTarget(
-                                              chatId: realId,
-                                              title: c.title,
-                                              mode: ChatMode.dm,
-                                              avatarUrl: c.avatarUrl,
-                                              open: (ctx) async {
-                                                await Navigator.of(ctx)
-                                                    .push(MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      BlocProvider.value(
-                                                    value:
-                                                        ctx.read<TeamCubit>(),
-                                                    child: DirectChatScreen(
-                                                      peerId: c.peerId!,
-                                                      peerName: c.title,
-                                                      peerAvatarUrl:
-                                                          c.avatarUrl,
-                                                      initialChatId: realId,
-                                                    ),
-                                                  ),
-                                                ));
-                                              },
-                                            ));
-                                      } else {
-                                        String? chatId = c.chatId;
-                                        if (chatId == null || chatId.isEmpty) {
-                                          try {
-                                            final res =
-                                                await resolveForwardTargetForSession(
-                                                    current,
-                                                    () => Supabase
-                                                        .instance.client
-                                                        .from('chats')
-                                                        .select('id')
-                                                        .eq('team_id',
-                                                            c.team.id)
-                                                        .eq('type', 'team_main')
-                                                        .limit(1)
-                                                        .maybeSingle());
-                                            if (res != null) {
-                                              chatId =
-                                                  (res['id'] ?? '').toString();
-                                            }
-                                          } catch (_) {}
-                                        }
-                                        if (!current()) return;
-                                        // ignore: use_build_context_synchronously
-                                        Navigator.pop(
-                                            context,
-                                            ForwardTarget(
-                                              chatId: chatId ?? '',
-                                              title: c.title,
-                                              mode: ChatMode.team,
-                                              avatarUrl: c.avatarUrl,
-                                              open: (ctx) async {
-                                                await Navigator.of(ctx)
-                                                    .push(MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      TeamDetailsScreen(
-                                                          team: c.team,
-                                                          initialTabIndex: 1),
-                                                ));
-                                              },
-                                            ));
-                                      }
-                                    } catch (_) {}
-                                    return;
-                                  }
                                   if (c.isDm &&
                                       (c.peerId?.isNotEmpty ?? false)) {
                                     await Navigator.of(context).push(
@@ -1298,6 +1335,34 @@ class _MyChatsScreenState extends State<MyChatsScreen>
                         ),
                       ),
           ),
+          if (widget.pickMode)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (selectedRecipient != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'Кому: ${selectedRecipient.title}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    FilledButton(
+                      onPressed: selectedRecipient == null || _resolvingForwardRecipient
+                          ? null
+                          : () => unawaited(_confirmForwardRecipient(selectedRecipient)),
+                      child: Text(_resolvingForwardRecipient ? 'Открываем чат…' : 'Продолжить'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );

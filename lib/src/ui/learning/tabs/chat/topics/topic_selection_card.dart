@@ -80,20 +80,14 @@ class TopicSelectionCard extends StatefulWidget {
 
 class _TopicSelectionCardState extends State<TopicSelectionCard> {
   ChatActionCardEntry? _entry;
-  bool _loading = true;
-  bool _retrying = false;
   int _loadRevision = 0;
   AuthSessionScope? _scope;
   AuthOperationScope? _entryOwner;
+  AppLifecycleListener? _retryOnResume;
   bool get _entryCurrent => _entryOwner != null && _scope?.isCurrent(_entryOwner!) == true;
 
   ChatActionCardsCache get _cache =>
       widget.cache ?? ChatActionCardsCache.instance;
-
-  @override
-  void initState() {
-    super.initState();
-  }
 
   @override
   void didChangeDependencies() {
@@ -104,18 +98,18 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     _scope = next;
     _scope?.addListener(_ownerChanged);
     _entry = null; _entryOwner = null;
-    _loading = true;
     _load();
   }
 
   void _ownerChanged() {
     if (!mounted) return;
-    setState(() { _entry = null; _entryOwner = null; _loading = true; });
+    setState(() { _entry = null; _entryOwner = null; });
     _load();
   }
 
   @override
   void dispose() {
+    _retryOnResume?.dispose();
     _loadRevision++;
     _scope?.removeListener(_ownerChanged);
     super.dispose();
@@ -127,8 +121,10 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     if (oldWidget.message.cardEntityId != widget.message.cardEntityId ||
         oldWidget.message.chatId != widget.message.chatId ||
         oldWidget.message.id != widget.message.id) {
-      _entry = null; _entryOwner = null;
-      _loading = true;
+      _retryOnResume?.dispose();
+      _retryOnResume = null;
+      _entry = null;
+      _entryOwner = null;
       _load();
     }
   }
@@ -140,7 +136,6 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final messageId = widget.message.id;
     final scope = _scope;
     if (selectionId == null || selectionId.isEmpty || chatId.isEmpty || !_looksLikeUuid(messageId)) {
-      if (mounted) setState(() { _loading = false; _retrying = false; });
       return;
     }
     if (scope != null) await scope.ready;
@@ -151,28 +146,32 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     bool current() => sameWidget() && scope != null && owner != null && scope.isCurrent(owner);
 
     try {
-      if (!current()) throw StateError('Сессия изменилась');
-      final entry = await StrictChatCardLoader.instance.load(
+      if (!current()) return;
+      final loader = StrictChatCardLoader.instance;
+      final saved = loader.peek(scope, chatId, messageId, ChatActionCardKind.topicSelection, selectionId);
+      if (saved != null) {
+        setState(() { _entry = saved; _entryOwner = owner; });
+      }
+      final entry = await loader.load(
         scope: scope, chatId: chatId,
         messageId: messageId,
         kind: ChatActionCardKind.topicSelection,
         entityId: selectionId,
       );
       if (!current()) return;
+      _retryOnResume?.dispose();
+      _retryOnResume = null;
       setState(() {
         _entry = entry;
         _entryOwner = owner;
-        _loading = false;
-        _retrying = false;
       });
     } catch (error) {
       if (!sameWidget() || (scope != null && owner != null && !scope.isCurrent(owner))) return;
-      final retain = _entryCurrent && _entry != null &&
-          (error is TimeoutException || error is ClientException);
+      final transient = error is TimeoutException || error is ClientException;
+      if (transient) _retryOnResume ??= AppLifecycleListener(onResume: _load);
+      final retain = _entryCurrent && _entry != null && transient;
       setState(() {
         if (!retain) { _entry = null; _entryOwner = null; }
-        _loading = false;
-        _retrying = false;
       });
     }
   }
@@ -275,40 +274,32 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final entry = _entryCurrent ? _entry : null;
-    if (entry == null && !_loading) {
-      ChatCardVisibilityScope.setVisible(context, true);
-      return _CardLoadFailure(onRetry: _retrying ? null : () {
-        setState(() => _retrying = true);
-        _load();
-      });
-    }
-    final title =
-        (entry?.title.isNotEmpty ?? false) ? entry!.title : 'Без названия';
-    final removed = entry != null &&
-        (entry.tombstoned ||
-            !entry.available ||
-            entry.status == 'cancelled' ||
-            entry.status == 'unavailable');
+    if (entry == null) return const UnavailableChatCard();
+    final title = entry.title.isNotEmpty ? entry.title : 'Без названия';
+    final removed = entry.tombstoned ||
+        !entry.available ||
+        entry.status == 'cancelled' ||
+        entry.status == 'unavailable';
     if (removed) {
       return const UnavailableChatCard(key: ValueKey('topic_removed'));
     }
-    if (entry != null) ChatCardVisibilityScope.setVisible(context, true);
-    final closed = entry != null && entry.available && entry.isClosed;
-    final progress = (entry != null && entry.totalCapacity > 0)
+    ChatCardVisibilityScope.setVisible(context, true);
+    final closed = entry.isClosed;
+    final progress = entry.totalCapacity > 0
         ? 'Занято ${entry.takenSlots} из ${entry.totalCapacity}'
         : null;
 
     final meta = [
-      if (entry?.deadlineAt != null) 'До ${_fmtDate(entry!.deadlineAt!)}',
+      if (entry.deadlineAt != null) 'До ${_fmtDate(entry.deadlineAt!)}',
       if (progress != null) progress,
-      if ((entry?.myPickText ?? '').trim().isNotEmpty)
-        'Моя: ${entry!.myPickText}',
+      if ((entry.myPickText ?? '').trim().isNotEmpty)
+        'Моя: ${entry.myPickText}',
     ].where((e) => e.isNotEmpty).join(' · ');
 
     return GestureDetector(
       key: widget.boundaryKey,
       onLongPress: widget.onLongPress,
-      onTap: entry == null ? null : _openDetail,
+      onTap: _openDetail,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -318,84 +309,84 @@ class _TopicSelectionCardState extends State<TopicSelectionCard> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: cs.primary.withValues(alpha: 0.28)),
         ),
-        child: _loading && entry == null
-            ? const _CardSkeleton()
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        kTopicKindLabel,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        'Открыть',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: cs.primary,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      Icon(Icons.chevron_right_rounded,
-                          size: 20, color: cs.primary),
-                    ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  kTopicKindLabel,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    title.isNotEmpty ? title : 'Без названия',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: cs.onSurface,
-                      height: 1.2,
-                    ),
+                ),
+                const Spacer(),
+                Text(
+                  'Открыть',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w800,
                   ),
-                  if ((entry?.description ?? '').trim().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      entry!.description.trim(),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  if (closed) ...[
-                    const SizedBox(height: 8),
-                    _ClosedCompactRow(
-                        title: title, label: kTopicClosedLabel),
-                  ] else ...[
-                    if (meta.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        meta,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                    if (_canShowDelete(closed)) ...[
-                      const SizedBox(height: 4),
-                      TextButton(
-                        onPressed: _deleteTopic,
-                        style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          minimumSize: const Size(0, 32),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: Text(
-                          'Удалить',
-                          style: TextStyle(color: cs.error),
-                        ),
-                      ),
-                    ],
-                  ],
-                ],
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 20, color: cs.primary),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: cs.onSurface,
+                height: 1.2,
               ),
+            ),
+            if (entry.description.trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                entry.description.trim(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (closed) ...[
+              const SizedBox(height: 8),
+              _ClosedCompactRow(
+                  title: title, label: kTopicClosedLabel),
+            ] else ...[
+              if (meta.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  meta,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              if (_canShowDelete(closed)) ...[
+                const SizedBox(height: 4),
+                TextButton(
+                  onPressed: _deleteTopic,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Удалить',
+                    style: TextStyle(color: cs.error),
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -432,14 +423,13 @@ class CollectionCard extends StatefulWidget {
 
 class _CollectionCardState extends State<CollectionCard> {
   ChatActionCardEntry? _entry;
-  bool _loading = true;
-  bool _retrying = false;
   bool _canManage = false;
   bool _canDelete = false;
   int _loadRevision = 0;
   int _capabilitiesRevision = 0;
   AuthSessionScope? _scope;
   AuthOperationScope? _entryOwner;
+  AppLifecycleListener? _retryOnResume;
   bool get _entryCurrent => _entryOwner != null && _scope?.isCurrent(_entryOwner!) == true;
 
   ChatActionCardsCache get _cache =>
@@ -461,7 +451,6 @@ class _CollectionCardState extends State<CollectionCard> {
     _scope = next;
     _scope?.addListener(_ownerChanged);
     _entry = null; _entryOwner = null;
-    _loading = true;
     _load();
     _resolveCapabilities();
   }
@@ -469,7 +458,7 @@ class _CollectionCardState extends State<CollectionCard> {
   void _ownerChanged() {
     if (!mounted) return;
     _capabilitiesRevision++;
-    setState(() { _entry = null; _entryOwner = null; _loading = true;
+    setState(() { _entry = null; _entryOwner = null;
       _canManage = widget.canManage ?? false; _canDelete = widget.canDelete ?? false; });
     _load();
     _resolveCapabilities();
@@ -477,6 +466,7 @@ class _CollectionCardState extends State<CollectionCard> {
 
   @override
   void dispose() {
+    _retryOnResume?.dispose();
     _loadRevision++;
     _capabilitiesRevision++;
     _scope?.removeListener(_ownerChanged);
@@ -494,8 +484,10 @@ class _CollectionCardState extends State<CollectionCard> {
     if (oldWidget.message.cardEntityId != widget.message.cardEntityId ||
         oldWidget.message.chatId != widget.message.chatId ||
         oldWidget.message.id != widget.message.id) {
-      _entry = null; _entryOwner = null;
-      _loading = true;
+      _retryOnResume?.dispose();
+      _retryOnResume = null;
+      _entry = null;
+      _entryOwner = null;
       _canManage = widget.canManage ?? false;
       _canDelete = widget.canDelete ?? false;
       _resolveCapabilities();
@@ -541,7 +533,6 @@ class _CollectionCardState extends State<CollectionCard> {
     final messageId = widget.message.id;
     final scope = _scope;
     if (id == null || id.isEmpty || chatId.isEmpty || !_looksLikeUuid(messageId)) {
-      if (mounted) setState(() { _loading = false; _retrying = false; });
       return;
     }
 
@@ -553,28 +544,32 @@ class _CollectionCardState extends State<CollectionCard> {
     bool current() => sameWidget() && scope != null && owner != null && scope.isCurrent(owner);
 
     try {
-      if (!current()) throw StateError('Сессия изменилась');
-      final entry = await StrictChatCardLoader.instance.load(
+      if (!current()) return;
+      final loader = StrictChatCardLoader.instance;
+      final saved = loader.peek(scope, chatId, messageId, ChatActionCardKind.groupCollection, id);
+      if (saved != null) {
+        setState(() { _entry = saved; _entryOwner = owner; });
+      }
+      final entry = await loader.load(
         scope: scope, chatId: chatId,
         messageId: messageId,
         kind: ChatActionCardKind.groupCollection,
         entityId: id,
       );
       if (!current()) return;
+      _retryOnResume?.dispose();
+      _retryOnResume = null;
       setState(() {
         _entry = entry;
         _entryOwner = owner;
-        _loading = false;
-        _retrying = false;
       });
     } catch (error) {
       if (!sameWidget() || (scope != null && owner != null && !scope.isCurrent(owner))) return;
-      final retain = _entryCurrent && _entry != null &&
-          (error is TimeoutException || error is ClientException);
+      final transient = error is TimeoutException || error is ClientException;
+      if (transient) _retryOnResume ??= AppLifecycleListener(onResume: _load);
+      final retain = _entryCurrent && _entry != null && transient;
       setState(() {
         if (!retain) { _entry = null; _entryOwner = null; }
-        _loading = false;
-        _retrying = false;
       });
     }
   }
@@ -677,37 +672,29 @@ class _CollectionCardState extends State<CollectionCard> {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final entry = _entryCurrent ? _entry : null;
-    if (entry == null && !_loading) {
-      ChatCardVisibilityScope.setVisible(context, true);
-      return _CardLoadFailure(onRetry: _retrying ? null : () {
-        setState(() => _retrying = true);
-        _load();
-      });
-    }
-    final title =
-        (entry?.title.isNotEmpty ?? false) ? entry!.title : 'Без названия';
-    final removed = entry != null &&
-        (entry.tombstoned ||
-            !entry.available ||
-            entry.status == 'cancelled' ||
-            entry.status == 'unavailable');
+    if (entry == null) return const UnavailableChatCard();
+    final title = entry.title.isNotEmpty ? entry.title : 'Без названия';
+    final removed = entry.tombstoned ||
+        !entry.available ||
+        entry.status == 'cancelled' ||
+        entry.status == 'unavailable';
     if (removed) {
       return const UnavailableChatCard(key: ValueKey('collection_removed'));
     }
-    if (entry != null) ChatCardVisibilityScope.setVisible(context, true);
-    final closed = entry != null && entry.available && entry.isClosed;
+    ChatCardVisibilityScope.setVisible(context, true);
+    final closed = entry.isClosed;
 
-    final done = collectionParticipantIsDone(entry?.myStatus);
-    final statusLine = collectionParticipantStatusLabel(entry?.myStatus);
+    final done = collectionParticipantIsDone(entry.myStatus);
+    final statusLine = collectionParticipantStatusLabel(entry.myStatus);
     final meta = [
-      if (entry?.deadlineAt != null) 'До ${_fmtDate(entry!.deadlineAt!)}',
+      if (entry.deadlineAt != null) 'До ${_fmtDate(entry.deadlineAt!)}',
       if (done) statusLine else 'Можно прикрепить чек',
     ].where((e) => e.isNotEmpty).join(' · ');
 
     return GestureDetector(
       key: widget.boundaryKey,
       onLongPress: widget.onLongPress,
-      onTap: entry == null ? null : _open,
+      onTap: _open,
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -716,96 +703,96 @@ class _CollectionCardState extends State<CollectionCard> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: cs.secondary.withValues(alpha: 0.28)),
         ),
-        child: _loading && entry == null
-            ? const _CardSkeleton()
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        kCollectionKindLabelLong,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (_canManage)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: Text(
-                            'орг.',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: cs.secondary,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      Text(
-                        'Открыть',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: cs.secondary,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      Icon(Icons.chevron_right_rounded,
-                          size: 20, color: cs.secondary),
-                    ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  kCollectionKindLabelLong,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    title.isNotEmpty ? title : 'Без названия',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: cs.onSurface,
-                      height: 1.2,
+                ),
+                const Spacer(),
+                if (_canManage)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Text(
+                      'орг.',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: cs.secondary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                  if ((entry?.purpose ?? '').trim().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      entry!.purpose.trim(),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  if (closed) ...[
-                    const SizedBox(height: 8),
-                    _ClosedCompactRow(
-                        title: title, label: kCollectionClosedLabel),
-                  ] else ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      meta,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: done
-                            ? const Color(0xFF2F9D84)
-                            : cs.onSurfaceVariant,
-                        fontWeight: done ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                    ),
-                    if (_canShowDelete(closed)) ...[
-                      const SizedBox(height: 4),
-                      TextButton(
-                        onPressed: _deleteCollection,
-                        style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          minimumSize: const Size(0, 32),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: Text(
-                          'Удалить',
-                          style: TextStyle(color: cs.error),
-                        ),
-                      ),
-                    ],
-                  ],
-                ],
+                Text(
+                  'Открыть',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: cs.secondary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 20, color: cs.secondary),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: cs.onSurface,
+                height: 1.2,
               ),
+            ),
+            if (entry.purpose.trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                entry.purpose.trim(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (closed) ...[
+              const SizedBox(height: 8),
+              _ClosedCompactRow(
+                  title: title, label: kCollectionClosedLabel),
+            ] else ...[
+              const SizedBox(height: 6),
+              Text(
+                meta,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: done
+                      ? const Color(0xFF2F9D84)
+                      : cs.onSurfaceVariant,
+                  fontWeight: done ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+              if (_canShowDelete(closed)) ...[
+                const SizedBox(height: 4),
+                TextButton(
+                  onPressed: _deleteCollection,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Удалить',
+                    style: TextStyle(color: cs.error),
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -841,39 +828,47 @@ class _ClosedCompactRow extends StatelessWidget {
   }
 }
 
-class _CardLoadFailure extends StatelessWidget {
-  const _CardLoadFailure({required this.onRetry});
-  final VoidCallback? onRetry;
-  @override
-  Widget build(BuildContext context) => TextButton.icon(
-    onPressed: onRetry, icon: const Icon(Icons.refresh_rounded),
-    label: const Text('Не удалось загрузить карточку'),
-  );
-}
+/// Display-only summary of a verified action card in a retained chat.
+class SavedActionCardPreview extends StatelessWidget {
+  const SavedActionCardPreview({super.key, required this.entry});
 
-class _CardSkeleton extends StatelessWidget {
-  const _CardSkeleton();
+  final ChatActionCardEntry entry;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    Widget bar(double width, double height) => Container(
-          width: width,
-          height: height,
-          decoration: BoxDecoration(
-            color: cs.onSurface.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(6),
-          ),
-        );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        bar(72, 14),
-        const SizedBox(height: 8),
-        bar(160, 16),
-        const SizedBox(height: 8),
-        bar(120, 12),
-      ],
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final accent = entry.isTopic ? colors.primary : colors.secondary;
+    final description = entry.isTopic ? entry.description : entry.purpose;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: .28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(entry.isTopic ? kTopicKindLabel : kCollectionKindLabelLong,
+              style: theme.textTheme.labelMedium),
+          const SizedBox(height: 6),
+          Text(entry.title.isEmpty ? 'Без названия' : entry.title,
+              maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+          if (description.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(description.trim(), maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall),
+          ],
+          if (entry.isClosed) ...[
+            const SizedBox(height: 8),
+            _ClosedCompactRow(title: entry.title,
+                label: entry.isTopic ? kTopicClosedLabel : kCollectionClosedLabel),
+          ],
+        ],
+      ),
     );
   }
 }

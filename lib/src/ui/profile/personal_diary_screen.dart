@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/personal_diary_service.dart';
 import '../common/friendly_empty_state.dart';
+import '../shared/diary_search_field.dart';
 import '../shared/workspace_page_header.dart';
 import '../learning/tabs/chat/navigation/group_action_deeplink.dart';
 import '../schedule/subject_diary/subject_diary.dart';
@@ -20,6 +21,8 @@ class PersonalDiaryScreen extends StatefulWidget {
   State<PersonalDiaryScreen> createState() => _PersonalDiaryScreenState();
 }
 
+enum _DiaryTasksView { active, completed }
+
 class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsBindingObserver {
   late final _service = widget.service ?? PersonalDiaryService();
   final _searchController = TextEditingController();
@@ -29,6 +32,10 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsB
   int _refreshGeneration = 0;
   late Future<PersonalDiaryData> _future;
   late DateTime _today;
+  static const _taskPageSize = 8;
+  _DiaryTasksView _tasksView = _DiaryTasksView.active;
+  int _activeTaskLimit = _taskPageSize;
+  int _completedTaskLimit = _taskPageSize;
 
   @override
   void initState() {
@@ -179,9 +186,8 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsB
           bool isToday(_UpcomingDiaryItem item) => DateUtils.isSameDay(
               item.task != null ? item.dueAt : item.dueAt?.toLocal(), _today);
           final todayItems = upcomingItems.where(isToday).toList();
-          final otherItems =
-              upcomingItems.where((item) => !isToday(item)).take(8).toList();
-          final hiddenDoneItems = _buildDoneUpcomingItems(data)
+          final otherItems = upcomingItems.where((item) => !isToday(item)).toList();
+          final doneItems = _buildDoneUpcomingItems(data)
               .where((item) => _matchesUpcomingItem(item, query))
               .toList();
 
@@ -194,6 +200,8 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsB
                 child: RefreshIndicator(
                   onRefresh: _refresh,
                   child: ListView(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
                     padding: EdgeInsets.fromLTRB(
                       compact ? 12 : 16,
                       14,
@@ -203,7 +211,7 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsB
                     children: [
                       _DiarySummaryCard(data: data),
                       const SizedBox(height: 10),
-                      _SearchField(
+                      DiarySearchField(
                         controller: _searchController,
                         hintText: 'Поиск по дневнику',
                         onChanged: (_) => setState(() {}),
@@ -211,48 +219,69 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsB
                       SizedBox(height: compact ? 14 : 18),
                       _SectionTitle(
                         title: 'Ближайшие дела',
-                        subtitle: _upcomingSectionSubtitle(data, upcomingItems),
+                        subtitle: _tasksView == _DiaryTasksView.active
+                            ? _upcomingSectionSubtitle(data, upcomingItems)
+                            : null,
                       ),
                       const SizedBox(height: 8),
-                      if (upcomingItems.isEmpty)
-                        const _EmptyCard(
-                          text: 'Активных ближайших дел пока нет.',
-                        ),
-                      if (todayItems.isNotEmpty)
-                        _CollapsibleTasksSection(
-                          key: ValueKey('today_tasks_${data.academicContext.userId}'),
-                          userId: data.academicContext.userId,
-                          section: 'today_tasks',
-                          title: 'Сегодня',
-                          subtitle: '${todayItems.length} в списке',
-                          icon: Icons.today_outlined,
-                          items: todayItems,
-                          itemBuilder: _buildUpcomingCard,
-                          initiallyExpanded: true,
-                        ),
-                      if (otherItems.isNotEmpty)
-                        _CollapsibleTasksSection(
-                          key: ValueKey('active_tasks_${data.academicContext.userId}'),
-                          userId: data.academicContext.userId,
-                          section: 'active_tasks',
-                          title: 'Активные ближайшие',
-                          subtitle: '${otherItems.length} в списке',
-                          icon: Icons.upcoming_rounded,
-                          items: otherItems,
-                          itemBuilder: _buildUpcomingCard,
-                          initiallyExpanded: true,
-                        ),
-                      if (hiddenDoneItems.isNotEmpty)
-                        _CollapsibleTasksSection(
-                          key: ValueKey('done_tasks_${data.academicContext.userId}'),
-                          userId: data.academicContext.userId,
-                          section: 'done_tasks',
-                          title: 'Выполненные',
-                          subtitle: '${hiddenDoneItems.length} скрыто',
-                          icon: Icons.done_all_rounded,
-                          items: hiddenDoneItems,
-                          itemBuilder: _buildUpcomingCard,
-                        ),
+                      _DiaryTasksTabs(
+                        selected: _tasksView,
+                        onSelected: (view) => setState(() => _tasksView = view),
+                      ),
+                      const SizedBox(height: 8),
+                      if (_tasksView == _DiaryTasksView.active) ...[
+                        if (upcomingItems.isEmpty)
+                          _EmptyCard(
+                            text: query.isEmpty
+                                ? 'Активных ближайших дел пока нет.'
+                                : 'По запросу нет активных дел.',
+                          ),
+                        if (todayItems.isNotEmpty)
+                          _CollapsibleTasksSection(
+                            key: ValueKey('today_tasks_${data.academicContext.userId}'),
+                            userId: data.academicContext.userId,
+                            section: 'today_tasks',
+                            title: 'Сегодня',
+                            subtitle: '${todayItems.length} в списке',
+                            icon: Icons.today_outlined,
+                            items: todayItems,
+                            itemBuilder: _buildUpcomingCard,
+                            initiallyExpanded: true,
+                          ),
+                        if (otherItems.isNotEmpty)
+                          _CollapsibleTasksSection(
+                            key: ValueKey('active_tasks_${data.academicContext.userId}'),
+                            userId: data.academicContext.userId,
+                            section: 'active_tasks',
+                            title: 'Активные ближайшие',
+                            subtitle: '${otherItems.length} в списке',
+                            icon: Icons.upcoming_rounded,
+                            items: otherItems.take(_activeTaskLimit).toList(),
+                            itemBuilder: _buildUpcomingCard,
+                            onShowMore: otherItems.length > _activeTaskLimit
+                                ? () => setState(() => _activeTaskLimit += _taskPageSize)
+                                : null,
+                            initiallyExpanded: true,
+                          ),
+                      ] else ...[
+                        if (doneItems.isEmpty)
+                          _EmptyCard(
+                            text: query.isEmpty
+                                ? 'Завершённых дел пока нет.'
+                                : 'По запросу нет завершённых дел.',
+                          )
+                        else ...doneItems
+                            .take(_completedTaskLimit)
+                            .map(_buildUpcomingCard),
+                        if (doneItems.length > _completedTaskLimit)
+                          Center(
+                            child: TextButton(
+                              onPressed: () => setState(
+                                  () => _completedTaskLimit += _taskPageSize),
+                              child: const Text('Показать ещё'),
+                            ),
+                          ),
+                      ],
                       SizedBox(height: compact ? 14 : 18),
                       _SectionTitle(
                         title: 'Последние записи',
@@ -262,9 +291,10 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsB
                       ),
                       const SizedBox(height: 8),
                       if (latestEntries.isEmpty)
-                        const _EmptyCard(
-                          text:
-                              'Записей пока нет. Открой предмет и добавь первую заметку.',
+                        _EmptyCard(
+                          text: query.isEmpty
+                              ? 'Записей пока нет. Открой предмет и добавь первую заметку.'
+                              : 'По запросу нет записей.',
                         )
                       else
                         ...latestEntries.map(_LatestEntryCard.new),
@@ -305,42 +335,32 @@ class _PersonalDiaryScreenState extends State<PersonalDiaryScreen> with WidgetsB
     );
   }
 
-  List<_UpcomingDiaryItem> _buildUpcomingItems(PersonalDiaryData data) {
-    final items = <_UpcomingDiaryItem>[
-      ...(data.publishedAssignments.isEmpty
-              ? data.upcomingAssignments
-              : data.publishedAssignments)
-          .map(_UpcomingDiaryItem.groupAssignment),
-      ...data.groupActions
-          .where((a) => !a.isCompleted)
-          .map(_UpcomingDiaryItem.groupAction),
-      ...(data.personalTasks.isEmpty
-              ? data.upcomingPersonalTasks
-              : data.personalTasks)
-          .map(_UpcomingDiaryItem.personalTask),
-    ].where((item) => !_isUpcomingItemDone(item)).toList()
-      ..sort((a, b) {
-        final aDue = a.dueAt;
-        final bDue = b.dueAt;
-        if (aDue != null && bDue != null) return aDue.compareTo(bDue);
-        if (aDue != null) return -1;
-        if (bDue != null) return 1;
-        return a.createdAt.compareTo(b.createdAt);
-      });
-    return items;
-  }
+  Iterable<_UpcomingDiaryItem> _taskItems(PersonalDiaryData data) => [
+        ...(data.publishedAssignments.isEmpty
+                ? data.upcomingAssignments
+                : data.publishedAssignments)
+            .map(_UpcomingDiaryItem.groupAssignment),
+        ...data.groupActions.map(_UpcomingDiaryItem.groupAction),
+        ...(data.personalTasks.isEmpty
+                ? data.upcomingPersonalTasks
+                : data.personalTasks)
+            .map(_UpcomingDiaryItem.personalTask),
+      ];
 
-  List<_UpcomingDiaryItem> _buildDoneUpcomingItems(PersonalDiaryData data) {
-    final items = <_UpcomingDiaryItem>[
-      ...data.publishedAssignments.map(_UpcomingDiaryItem.groupAssignment),
-      ...data.groupActions
-          .where((a) => a.isCompleted)
-          .map(_UpcomingDiaryItem.groupAction),
-      ...data.personalTasks.map(_UpcomingDiaryItem.personalTask),
-    ].where(_isUpcomingItemDone).toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return items.take(8).toList();
-  }
+  List<_UpcomingDiaryItem> _buildUpcomingItems(PersonalDiaryData data) =>
+      _taskItems(data).where((item) => !_isUpcomingItemDone(item)).toList()
+        ..sort((a, b) {
+          final aDue = a.dueAt;
+          final bDue = b.dueAt;
+          if (aDue != null && bDue != null) return aDue.compareTo(bDue);
+          if (aDue != null) return -1;
+          if (bDue != null) return 1;
+          return a.createdAt.compareTo(b.createdAt);
+        });
+
+  List<_UpcomingDiaryItem> _buildDoneUpcomingItems(PersonalDiaryData data) =>
+      _taskItems(data).where(_isUpcomingItemDone).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
   String _upcomingSectionSubtitle(
     PersonalDiaryData data,
@@ -1430,7 +1450,8 @@ class _MonthGrid extends StatelessWidget {
             final selected = _sameDate(day, selectedDay);
             final colors = eventColorsForDay(day);
             return InkWell(
-              onTap: () => onSelect(DateTime(day.year, day.month, day.day)),
+              key: ValueKey<DateTime>(DateUtils.dateOnly(day)),
+              onTap: () => onSelect(DateUtils.dateOnly(day)),
               borderRadius: BorderRadius.circular(12),
               child: Container(
                 decoration: BoxDecoration(
@@ -1818,7 +1839,7 @@ class _SubjectPickerSheetState extends State<_SubjectPickerSheet> {
                   subtitle: 'Поиск, семестр и только нужные предметы.',
                 ),
                 const SizedBox(height: 10),
-                _SearchField(
+                DiarySearchField(
                   controller: _searchController,
                   hintText: 'Поиск по предмету',
                   onChanged: (_) => setState(() {}),
@@ -1974,7 +1995,7 @@ class _LessonPickerSheetState extends State<_LessonPickerSheet> {
                   subtitle: 'Поиск по расписанию с привязкой к паре.',
                 ),
                 const SizedBox(height: 10),
-                _SearchField(
+                DiarySearchField(
                   controller: _searchController,
                   hintText: 'Поиск по предмету',
                   onChanged: (_) => setState(() {}),
@@ -2103,38 +2124,6 @@ class _PickerHeader extends StatelessWidget {
               ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
       ],
-    );
-  }
-}
-
-class _SearchField extends StatelessWidget {
-  final TextEditingController controller;
-  final String hintText;
-  final ValueChanged<String> onChanged;
-
-  const _SearchField({
-    required this.controller,
-    required this.hintText,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      decoration: InputDecoration(
-        hintText: hintText,
-        prefixIcon: const Icon(Icons.search_rounded),
-        filled: true,
-        fillColor: Theme.of(context).colorScheme.surface,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-      ),
     );
   }
 }
@@ -2529,6 +2518,31 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
+class _DiaryTasksTabs extends StatelessWidget {
+  const _DiaryTasksTabs({required this.selected, required this.onSelected});
+
+  final _DiaryTasksView selected;
+  final ValueChanged<_DiaryTasksView> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return SegmentedButton<_DiaryTasksView>(
+      segments: const [
+        ButtonSegment(value: _DiaryTasksView.active, label: Text('В работе')),
+        ButtonSegment(value: _DiaryTasksView.completed, label: Text('Готово')),
+      ],
+      selected: {selected},
+      onSelectionChanged: (selection) => onSelected(selection.single),
+      showSelectedIcon: false,
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(0, 44)),
+        side: WidgetStatePropertyAll(BorderSide(color: colors.outlineVariant)),
+      ),
+    );
+  }
+}
+
 class _CollapsibleTasksSection extends StatelessWidget {
   final String? userId;
   final String section;
@@ -2538,6 +2552,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
   final List<_UpcomingDiaryItem> items;
   final Widget Function(_UpcomingDiaryItem item) itemBuilder;
   final bool initiallyExpanded;
+  final VoidCallback? onShowMore;
 
   const _CollapsibleTasksSection({
     super.key,
@@ -2549,6 +2564,7 @@ class _CollapsibleTasksSection extends StatelessWidget {
     required this.items,
     required this.itemBuilder,
     this.initiallyExpanded = false,
+    this.onShowMore,
   });
 
   @override
@@ -2589,7 +2605,11 @@ class _CollapsibleTasksSection extends StatelessWidget {
                   .bodySmall
                   ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
-            children: items.map(itemBuilder).toList(),
+            children: [
+              ...items.map(itemBuilder),
+              if (onShowMore != null)
+                TextButton(onPressed: onShowMore, child: const Text('Показать ещё')),
+            ],
             ),
           ),
         ),
@@ -2685,10 +2705,12 @@ class _GroupActionDiaryCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   _KindBadge(text: action.kindLabel),
-                  const SizedBox(width: 8),
                   _PlainStatusBadge(text: statusText, done: done),
                 ],
               ),
@@ -2888,21 +2910,26 @@ class _AssignmentDiaryCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  _StatusBadge(done: done),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: onToggleDone,
-                    icon: Icon(
-                      done
-                          ? Icons.undo_rounded
-                          : Icons.check_circle_outline_rounded,
-                      size: 18,
+              SizedBox(
+                width: double.infinity,
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  children: [
+                    _StatusBadge(done: done),
+                    TextButton.icon(
+                      onPressed: onToggleDone,
+                      icon: Icon(
+                        done
+                            ? Icons.undo_rounded
+                            : Icons.check_circle_outline_rounded,
+                        size: 18,
+                      ),
+                      label: Text(done ? 'Не выполнено' : 'Выполнить'),
                     ),
-                    label: Text(done ? 'Не выполнено' : 'Выполнить'),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -3012,17 +3039,22 @@ class _PersonalTaskCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  const _KindBadge(text: 'Личная задача'),
-                  const SizedBox(width: 8),
-                  _TaskStatusBadge(task: task, statusOverride: statusOverride),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: onChangeStatus,
-                    child: const Text('Статус'),
-                  ),
-                ],
+              SizedBox(
+                width: double.infinity,
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    const _KindBadge(text: 'Личная задача'),
+                    _TaskStatusBadge(task: task, statusOverride: statusOverride),
+                    TextButton(
+                      onPressed: onChangeStatus,
+                      child: const Text('Статус'),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

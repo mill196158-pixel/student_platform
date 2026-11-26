@@ -40,6 +40,11 @@ void main() {
     ]), 200, request: requestInfo, headers: {'content-type': 'application/json'}));
     expect((await first).title, 'Первый');
     expect((await second).available, isFalse);
+    expect(loader.peek(scope, 'chat', 'message-1', 'collection', 'entity')?.title,
+        'Первый');
+    expect(loader.peek(scope, 'other-chat', 'message-1', 'collection', 'entity'),
+        isNull);
+    expect(loader.peek(scope, 'chat', 'message-2', 'collection', 'entity'), isNull);
 
     final late = Completer<http.Response>();
     http.BaseRequest? lateRequest;
@@ -59,6 +64,7 @@ void main() {
        'available': true, 'status': 'open', 'title': 'Старый'}
     ]), 200, request: lateRequest, headers: {'content-type': 'application/json'}));
     await rejected;
+    expect(loader.peek(scope, 'chat', 'message-1', 'collection', 'entity'), isNull);
     scope.dispose();
     await events.close();
     await client.dispose();

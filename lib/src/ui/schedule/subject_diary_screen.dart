@@ -1,6 +1,7 @@
 import '../profile/personal_task_deadline_button.dart';
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
+import '../shared/diary_search_field.dart';
 import '../shared/workspace_page_header.dart';
 import '../common/friendly_empty_state.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -612,7 +613,7 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: _DiarySearchField(
+            child: DiarySearchField(
               controller: _searchController,
               hintText: 'Поиск по дневнику предмета',
               onChanged: (_) => setState(() {}),
@@ -638,6 +639,8 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
                     child: _loading
                         ? const Center(child: ProductLoadingIndicator.page())
                         : CustomScrollView(
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
                             physics: const AlwaysScrollableScrollPhysics(),
                             slivers: [
                               SliverToBoxAdapter(
@@ -722,47 +725,6 @@ class _SubjectDiaryScreenState extends State<SubjectDiaryScreen> {
                   ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DiarySearchField extends StatelessWidget {
-  final TextEditingController controller;
-  final String hintText;
-  final ValueChanged<String> onChanged;
-
-  const _DiarySearchField({
-    required this.controller,
-    required this.hintText,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      decoration: InputDecoration(
-        hintText: hintText,
-        prefixIcon: const Icon(Icons.search_rounded),
-        suffixIcon: controller.text.isEmpty
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.close_rounded),
-                onPressed: () {
-                  controller.clear();
-                  onChanged('');
-                },
-              ),
-        filled: true,
-        fillColor: Colors.white,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide.none,
-        ),
       ),
     );
   }

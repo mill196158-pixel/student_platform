@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' as services;
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart' as fcr;
 import 'package:lottie/lottie.dart';
@@ -31,9 +32,17 @@ bool _isActionCard(Message m) => m.cardKind == 'topic_selection' ||
         (m.assignmentId == null || m.assignmentId!.isEmpty));
 
 class _CardVisibilityHost extends StatefulWidget {
-  const _CardVisibilityHost({required this.messages, required this.owner, required this.builder});
+  const _CardVisibilityHost({
+    required this.messages,
+    required this.owner,
+    required this.controller,
+    required this.messageKeys,
+    required this.builder,
+  });
   final List<Message> messages;
   final String? owner;
+  final ScrollController controller;
+  final Map<String, GlobalKey> messageKeys;
   final _VisibilityBuilder builder;
   @override
   State<_CardVisibilityHost> createState() => _CardVisibilityHostState();
@@ -44,6 +53,51 @@ class _CardVisibilityHostState extends State<_CardVisibilityHost> {
   AuthSessionScope? _scope;
   int _revision = 0;
   int _scopeRevision = 0;
+  bool _adjusting = false;
+
+  // Keep a visible ordinary message in place when a background card
+  // verification inserts or removes a row while the reader is in history.
+  void _keepVisibleMessage() {
+    final controller = widget.controller;
+    if (_adjusting || !controller.hasClients) return;
+    final position = controller.position;
+    final pixels = position.pixels;
+    if (pixels <= 1 || position.isScrollingNotifier.value) return;
+    GlobalKey? anchor;
+    RenderAbstractViewport? viewport;
+    double? offset;
+    for (final message in widget.messages.reversed) {
+      if (_isActionCard(message)) continue;
+      final key = widget.messageKeys[message.id];
+      final render = key?.currentContext?.findRenderObject();
+      if (render is! RenderBox || !render.attached) continue;
+      final view = RenderAbstractViewport.maybeOf(render);
+      if (view == null || view is! RenderBox) continue;
+      final box = view as RenderBox;
+      final dy = render.localToGlobal(Offset.zero, ancestor: box).dy;
+      if (dy < 0 || dy >= box.size.height) continue;
+      anchor = key;
+      viewport = view;
+      offset = view.getOffsetToReveal(render, 0).offset;
+      break;
+    }
+    if (anchor == null || viewport == null || offset == null) return;
+    final revision = _revision;
+    _adjusting = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _adjusting = false;
+      if (!mounted || revision != _revision || !controller.hasClients ||
+          controller.position != position || position.isScrollingNotifier.value ||
+          (position.pixels - pixels).abs() > 1) return;
+      final render = anchor!.currentContext?.findRenderObject();
+      if (render == null || !render.attached ||
+          !identical(RenderAbstractViewport.maybeOf(render), viewport)) return;
+      final shift = viewport!.getOffsetToReveal(render, 0).offset - offset!;
+      final target = (pixels + shift)
+          .clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
+      if ((target - pixels).abs() > 1) position.jumpTo(target);
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -100,6 +154,7 @@ class _CardVisibilityHostState extends State<_CardVisibilityHost> {
           (scope != null && (ownerTicket == null || !scope.isCurrent(ownerTicket))) ||
           !live.contains(id) ||
           (_states[id] ?? false) == visible) return;
+      _keepVisibleMessage();
       setState(() => _states[id] = visible);
     }
     return widget.builder(context, _states, report);
@@ -149,7 +204,6 @@ class ChatMessageList extends StatelessWidget {
   final Set<String>? selectedMessageIds;
   final void Function(String id)? onToggleSelect;
   final void Function(Message m)? onRetryFailedText;
-  final VoidCallback? onFocusComposer;
   final VoidCallback? onAttachFile;
   final VoidCallback? onCreateAssignment;
 
@@ -204,7 +258,6 @@ class ChatMessageList extends StatelessWidget {
     required this.selectedMessageIds,
     required this.onToggleSelect,
     this.onRetryFailedText,
-    this.onFocusComposer,
     this.onAttachFile,
     this.onCreateAssignment,
     this.isDirectChat = false,
@@ -248,7 +301,6 @@ class ChatMessageList extends StatelessWidget {
                 constraints: BoxConstraints(minHeight: height > 140 ? height - 108 : 180),
                 child: _EmptyChatState(
                   isDirectChat: isDirectChat,
-                  onFocusComposer: onFocusComposer,
                   onAttachFile: onAttachFile,
                   onCreateAssignment: isDirectChat ? null : onCreateAssignment,
                 ),
@@ -264,6 +316,8 @@ class ChatMessageList extends StatelessWidget {
     return _CardVisibilityHost(
       messages: list,
       owner: currentUserId,
+      controller: controller,
+      messageKeys: messageKeys,
       builder: (context, visibility, reportVisibility) {
         bool shown(Message m) => localOnlyBubbleBuilder != null || !_isActionCard(m) || _shouldCollapseBlockedMessage(m) ||
             visibility[_cardIdentity(m, currentUserId)] == true;
@@ -991,7 +1045,7 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
     return showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
-      barrierLabel: 'message_reactions',
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       barrierColor: Colors.black.withValues(alpha: 0.24),
       transitionDuration: const Duration(milliseconds: 160),
       pageBuilder: (dialogContext, animation, secondaryAnimation) {
@@ -1033,11 +1087,22 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
         final availableH = (bottomLimit - dialogTop).clamp(120.0, totalH);
 
         var actionCommitted = false;
+        final menuRegion = Object();
 
         void dismissDialogOnly() {
-          if (!dialogContext.mounted) return;
+          if (!dialogContext.mounted ||
+              ModalRoute.isCurrentOf(dialogContext) != true) return;
           Navigator.of(dialogContext).pop();
         }
+
+        // A scroll view fills the preview width even where it paints nothing.
+        // Treat only the controls as inside the menu.
+        Widget menuControl(Widget child) => TapRegion(
+              groupId: menuRegion,
+              consumeOutsideTaps: true,
+              onTapOutside: (_) => dismissDialogOnly(),
+              child: child,
+            );
 
         void commitMenuAction(String label) {
           if (actionCommitted) return;
@@ -1053,6 +1118,14 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
           onReactionSelected(emoji);
         }
 
+        Widget actions() => menuControl(_PackageActionsMenu(
+              menuItems: menuItems,
+              width: menuW,
+              isDark: Theme.of(dialogContext).brightness == Brightness.dark,
+              dragPosition: dragPosition,
+              dragRelease: dragRelease,
+              onTap: (item) => commitMenuAction(item.label),
+            ));
         return _PackageActionsDialogShell(
           onBackdropTap: () {
             if (actionCommitted) return;
@@ -1074,21 +1147,13 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
                   crossAxisAlignment: align,
                   children: [
                     if (menuAbove) ...[
-                      _PackageActionsMenu(
-                        menuItems: menuItems,
-                        width: menuW,
-                        isDark: Theme.of(dialogContext).brightness ==
-                            Brightness.dark,
-                        dragPosition: dragPosition,
-                        dragRelease: dragRelease,
-                        onTap: (item) => commitMenuAction(item.label),
-                      ),
+                      actions(),
                       const SizedBox(height: gap),
                     ],
-                    _PackageReactionPicker(
+                    menuControl(_PackageReactionPicker(
                       reactions: const ['👍', '❤️', '😂', '😮', '😢', '😡'],
                       onSelected: commitReaction,
-                    ),
+                    )),
                     const SizedBox(height: gap),
                     ConstrainedBox(
                       constraints: BoxConstraints(
@@ -1098,11 +1163,11 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
                             : maxPreviewH.toDouble(),
                       ),
                       child: _isForwardGroupPreview
-                          ? _PackageMessagePreview(
+                          ? menuControl(_PackageMessagePreview(
                               message: message,
                               liftBrightness: isMine,
                               child: previewChild,
-                            )
+                            ))
                           : IgnorePointer(
                               child: _PackageMessagePreview(
                                 message: message,
@@ -1113,15 +1178,7 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
                     ),
                     if (!menuAbove) ...[
                       const SizedBox(height: gap),
-                      _PackageActionsMenu(
-                        menuItems: menuItems,
-                        width: menuW,
-                        isDark: Theme.of(dialogContext).brightness ==
-                            Brightness.dark,
-                        dragPosition: dragPosition,
-                        dragRelease: dragRelease,
-                        onTap: (item) => commitMenuAction(item.label),
-                      ),
+                      actions(),
                     ],
                   ],
                 ),
@@ -1876,13 +1933,11 @@ class _ChatLoadErrorState extends StatelessWidget {
 
 class _EmptyChatState extends StatelessWidget {
   final bool isDirectChat;
-  final VoidCallback? onFocusComposer;
   final VoidCallback? onAttachFile;
   final VoidCallback? onCreateAssignment;
 
   const _EmptyChatState({
     this.isDirectChat = false,
-    this.onFocusComposer,
     this.onAttachFile,
     this.onCreateAssignment,
   });
@@ -1932,32 +1987,28 @@ class _EmptyChatState extends StatelessWidget {
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 16),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (onFocusComposer != null)
-                FilledButton.tonalIcon(
-                  onPressed: onFocusComposer,
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text('Написать'),
-                ),
-              if (onAttachFile != null)
-                OutlinedButton.icon(
-                  onPressed: onAttachFile,
-                  icon: const Icon(Icons.attach_file_rounded, size: 18),
-                  label: const Text('Файл'),
-                ),
-              if (onCreateAssignment != null)
-                OutlinedButton.icon(
-                  onPressed: onCreateAssignment,
-                  icon: const Icon(Icons.assignment_add, size: 18),
-                  label: const Text('Задание'),
-                ),
-            ],
-          ),
+          if (onAttachFile != null || onCreateAssignment != null) ...[
+            const SizedBox(height: 16),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (onAttachFile != null)
+                  OutlinedButton.icon(
+                    onPressed: onAttachFile,
+                    icon: const Icon(Icons.attach_file_rounded, size: 18),
+                    label: const Text('Файл'),
+                  ),
+                if (onCreateAssignment != null)
+                  OutlinedButton.icon(
+                    onPressed: onCreateAssignment,
+                    icon: const Icon(Icons.assignment_add, size: 18),
+                    label: const Text('Задание'),
+                  ),
+              ],
+            ),
+          ],
           if (!isDirectChat) ...[
             const SizedBox(height: 10),
             Text(

@@ -1,3 +1,4 @@
+import 'chat_composer_gate.dart';
 import 'package:flutter/material.dart';
 import '../../../models/message.dart';
 import '../composer.dart';
@@ -9,6 +10,8 @@ import 'chat_plus_menu.dart';
 class ChatComposerBar extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
+  final String? unavailableLabel;
+  final VoidCallback? onRetryAvailability;
 
   final Message? replyTo;
   final VoidCallback onCloseReply;
@@ -59,6 +62,8 @@ class ChatComposerBar extends StatelessWidget {
     super.key,
     required this.controller,
     required this.focusNode,
+    this.unavailableLabel,
+    this.onRetryAvailability,
     required this.replyTo,
     required this.onCloseReply,
     this.forwardCount = 0,
@@ -99,7 +104,7 @@ class ChatComposerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themed = Theme.of(context);
-    return Column(
+    final composer = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (replyTo != null)
@@ -228,6 +233,11 @@ class ChatComposerBar extends StatelessWidget {
           isSending: isSending,
         ),
       ],
+    );
+    return ChatComposerGate(
+      status: unavailableLabel,
+      onRetry: onRetryAvailability,
+      child: composer,
     );
   }
 

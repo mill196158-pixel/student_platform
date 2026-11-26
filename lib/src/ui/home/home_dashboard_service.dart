@@ -28,11 +28,6 @@ import 'package:student_platform/src/ui/schedule/schedule_prewarm.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/core/transport_failure.dart';
 
-typedef PublishedNewsPage = ({
-  List<HomeNewsItem> items,
-  Map<String, dynamic>? next,
-});
-
 class HomeDashboardService {
   HomeDashboardService({
     SupabaseClient? client,
@@ -405,37 +400,6 @@ class HomeDashboardService {
     return snapshot();
   }
 
-  /// The archive keeps pages in memory for this route only. Do not overwrite the
-  /// dashboard's last complete snapshot with one page.
-  Future<PublishedNewsPage> readNewsPage(Map<String, dynamic>? after,
-      {required bool Function() current}) async {
-    if (!current()) throw HomeLoadCancelled();
-    const pageSize = 20;
-    dynamic response;
-    try {
-      response = await _sb.rpc('get_my_published_news_page', params: {
-        'p_limit': pageSize, 'p_after': after,
-      });
-    } on PostgrestException catch (error) {
-      // Clients can be upgraded before the server. The legacy RPC enforces the
-      // same audience; use it only when the new function is absent.
-      if (error.code != 'PGRST202' || after != null || !current()) rethrow;
-      response = await _sb.rpc('get_my_published_news');
-      if (!current()) throw HomeLoadCancelled();
-      return (items: _asMapList(response).map(mapPublishedNews).toList(), next: null);
-    }
-    if (!current()) throw HomeLoadCancelled();
-    final rows = _asMapList(response);
-    final page = rows.take(pageSize).toList();
-    return (
-      items: page.map(mapPublishedNews).toList(),
-      next: rows.length > pageSize ? {
-        for (final key in ['sort_order', 'priority', 'published_at', 'id'])
-          key: page.last[key]
-      } : null,
-    );
-  }
-
   /// Marks a published news post as seen (and optionally closed) for the user.
   Future<void> markNewsSeen(String newsId, {bool closed = false}) async {
     final id = newsId.trim();
@@ -484,6 +448,7 @@ class HomeDashboardService {
           .rpc('get_my_published_news')
           .timeout(const Duration(seconds: 12));
       final rows = _asMapList(response);
+      if (rows.length > 1) rows.sort(_comparePublishedNews);
       if (!current()) return const [];
       await _newsCache.write(rows, owner: newsUser, isCurrent: current);
       if (!current()) return const [];
@@ -616,6 +581,28 @@ class HomeDashboardService {
       debugPrint('[home] news image download failed type=${e.runtimeType}');
       return null;
     }
+  }
+
+  static int _comparePublishedNews(
+      Map<String, dynamic> first, Map<String, dynamic> second) {
+    int number(Map<String, dynamic> row, String key) =>
+        int.tryParse(row[key]?.toString() ?? '') ?? 0;
+    final byPosition =
+        number(first, 'sort_order').compareTo(number(second, 'sort_order'));
+    if (byPosition != 0) return byPosition;
+    final byPriority =
+        number(second, 'priority').compareTo(number(first, 'priority'));
+    if (byPriority != 0) return byPriority;
+    final firstDate = DateTime.tryParse(first['published_at']?.toString() ?? '');
+    final secondDate = DateTime.tryParse(second['published_at']?.toString() ?? '');
+    if (firstDate != null && secondDate != null) {
+      final byDate = secondDate.compareTo(firstDate);
+      if (byDate != 0) return byDate;
+    } else if (firstDate != null || secondDate != null) {
+      return firstDate == null ? 1 : -1;
+    }
+    return (first['id']?.toString() ?? '')
+        .compareTo(second['id']?.toString() ?? '');
   }
 
   static List<Map<String, dynamic>> _asMapList(dynamic data) {

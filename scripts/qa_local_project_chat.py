@@ -49,7 +49,9 @@ def main():
                                  "integration_test/ordinary_project_chat_local_test.dart",
                                  "STUDENT_PROJECT_CHAT_LOCAL", required_markers=(
                                      "PASS ordinary login, materials, actual course assessment, exact team, native PDF and SHA-256",
-                                     "PASS 036 two system Back requests restored",))
+                                     "PASS 036 two system Back requests restored",
+                                     "PASS iPhone follow-up: list and forward",
+                                     "PASS iPhone follow-up: composer denied",))
             finally:
                 server.shutdown()
                 thread.join()

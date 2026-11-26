@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -11,6 +14,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/auth_transition_host.dart';
 import 'package:student_platform/src/themes/themes.dart';
+import 'package:student_platform/src/ui/chats/forward/forward_outbox_host.dart';
+import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/composer/chat_composer_gate.dart';
 import 'package:student_platform/src/ui/authentication/screens/login_screen.dart';
 import 'package:student_platform/src/ui/info/subject_info_screen.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
@@ -33,6 +41,12 @@ void main() {
       (t) async {
     final cfg = jsonDecode(raw) as Map<String, dynamic>;
     expect(cfg['schema'], matches(RegExp(r'^e2e_projectchat_[a-f0-9]{12}$')));
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(390, 844);
+    t.view.padding = const FakeViewPadding(top: 47, bottom: 34);
+    addTearDown(t.view.resetDevicePixelRatio);
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetPadding);
     await initializeDateFormatting('ru');
     SharedPreferences.setMockInitialValues({});
     final http = LocalSchemaHttpClient(cfg['restPort'] as int);
@@ -48,14 +62,33 @@ void main() {
             detectSessionInUri: false));
     final sb = Supabase.instance.client;
     File? verifiedExport;
+    final captureBoundary = GlobalKey();
+    Future<void> capture(String name) async {
+      final directory = Platform.environment['STUDENT_PROJECT_CAPTURES'];
+      if (directory == null) return;
+      final boundary = captureBoundary.currentContext!.findRenderObject()!
+          as RenderRepaintBoundary;
+      final image = await boundary.toImage();
+      try {
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        await File('$directory/$name.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+      } finally {
+        image.dispose();
+      }
+    }
+
     try {
       await t.pumpWidget(AuthTransitionHost(
           child: AuthSessionScopeHost(
-              child: MaterialApp(
+              child: ForwardOutboxHost(
+                  child: MaterialApp(
         theme: AppTheme.light().data,
+        builder: (_, child) =>
+            RepaintBoundary(key: captureBoundary, child: child),
         home: LoginScreen(toggleView: () {}),
         routes: {'/home': (_) => const NavigationScreen()},
-      ))));
+      )))));
       Future<void> wait(bool Function() ready, String label) async {
         final timer = Stopwatch()..start();
         while (!ready() && timer.elapsed < const Duration(seconds: 20)) {
@@ -189,6 +222,103 @@ void main() {
           find.byType(SubjectInfoScreen, skipOffstage: false), findsOneWidget);
       print(
           'PASS 036 two system Back requests restored the original files tab then the original course, with one route each');
+
+      final nav = Navigator.of(t.element(projectInfo));
+      nav.push<void>(MaterialPageRoute(
+          builder: (_) => const MyChatsScreen(enableRealtime: false)));
+      final catalog = find.byType(MyChatsScreen);
+      Finder teamScreen(String key) => find.byWidgetPredicate((widget) =>
+          widget is TeamDetailsScreen && widget.team.id == cfg[key]);
+      final targetTeam = teamScreen('team_project');
+      final sourceTeam = teamScreen('team_control');
+      Finder editor(Finder screen) =>
+          find.descendant(of: screen, matching: find.byType(EditableText));
+      final composer = editor(targetTeam);
+      final viewport = find.descendant(
+          of: targetTeam, matching: find.byType(ChatMessageList));
+      final projectRow =
+          find.byKey(ValueKey<String>(cfg['chat_project'] as String));
+      bool isCurrent(Finder screen) =>
+          screen.evaluate().isNotEmpty &&
+          ModalRoute.isCurrentOf(t.element(screen)) == true;
+      Future<void> waitForProject() =>
+          wait(() => isCurrent(targetTeam), 'Target project chat');
+      await tap(projectRow);
+      await waitForProject();
+      await wait(() => composer.hitTestable().evaluate().isNotEmpty,
+          'Composer from list');
+      final listRect = t.getRect(composer);
+      await back();
+      await wait(() => catalog.hitTestable().evaluate().isNotEmpty,
+          'Return to chat list');
+
+      await tap(find.byKey(ValueKey<String>(cfg['chat_control'] as String)));
+      await wait(
+          () =>
+              find.text('Обычный чат 036').hitTestable().evaluate().isNotEmpty,
+          'Source message');
+      await wait(() => editor(sourceTeam).hitTestable().evaluate().isNotEmpty,
+          'Source composer');
+      await t.longPress(find.text('Обычный чат 036').hitTestable());
+      await tap(find.text('Переслать'));
+      await tap(find.widgetWithText(ListTile, 'Сопромат'));
+      expect(find.text('Кому: Сопромат'), findsOneWidget);
+      await capture('native-forward-recipient');
+      await t.tap(find.widgetWithText(FilledButton, 'Продолжить'));
+      await waitForProject();
+      expect(
+          find.descendant(
+              of: targetTeam, matching: find.byType(ChatComposerGate)),
+          findsOneWidget);
+      await wait(
+          () => viewport.evaluate().isNotEmpty, 'Initial project viewport');
+      final initialViewport = t.getRect(viewport);
+      await wait(() => composer.hitTestable().evaluate().isNotEmpty,
+          'Forward destination composer');
+      expect(t.getRect(composer).bottom, closeTo(listRect.bottom, 1));
+      await wait(
+          () => find.byTooltip('Отменить пересылку').evaluate().isNotEmpty,
+          'Forward draft');
+      expect(t.getRect(viewport).top, closeTo(initialViewport.top, 1));
+      print(
+          'PASS iPhone follow-up: list and forward open the same writable team with the composer at the same bottom edge');
+
+      // Exercise the next opening with an authoritative response denying writes.
+      // History remains available throughout so the denial has a visible state.
+      await back();
+      await wait(() => isCurrent(sourceTeam), 'Return to source chat');
+      await sb.rpc('fixture_deny_project_writes');
+      final targetMessage = await sb
+          .from('messages')
+          .select('id')
+          .eq('chat_id', cfg['chat_project'] as String)
+          .single();
+      final sourceMessage = find.text('Обычный чат 036').hitTestable();
+      await wait(
+          () => sourceMessage.evaluate().isNotEmpty, 'Visible source message');
+      unawaited(openGroupActionDeeplink(
+        t.element(sourceMessage),
+        GroupActionDeeplinkArgs(
+          chatId: cfg['chat_project'] as String,
+          cardMessageId: targetMessage['id'] as String,
+          entityType: 'message',
+          entityId: '',
+        ),
+      ));
+      await waitForProject();
+      await wait(
+          () => find
+              .text('Только чтение. Отправка недоступна.')
+              .evaluate()
+              .isNotEmpty,
+          'Accessible read-only state');
+      expect(composer, findsNothing);
+      await wait(
+          () => find.text('Расчёт моста: проект 036').evaluate().isNotEmpty,
+          'History remains available for reading');
+      await capture('native-read-only-team');
+      print(
+          'PASS iPhone follow-up: composer denied, existing short team history readable');
     } finally {
       await t.pumpWidget(const SizedBox.shrink());
       await t.pump(const Duration(milliseconds: 350));

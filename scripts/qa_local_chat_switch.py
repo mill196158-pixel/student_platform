@@ -1,4 +1,5 @@
 """Run after local_e2e_schema.py --chat-journeys with three local QA configs."""
+from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
@@ -7,7 +8,45 @@ import sys
 from uuid import UUID, uuid4
 
 from local_e2e_schema import CONTAINER, ROOT, sql
+from qa_local_dm_messages import value
 
+
+@contextmanager
+def compose_publication(chat):
+    """Keep the Realtime event stream limited to the new synthetic chat."""
+    signature = """select pg_get_expr(r.prqual,r.prrelid)
+      from pg_publication_rel r join pg_publication p on p.oid=r.prpubid
+      where p.pubname='supabase_realtime' and r.prrelid='public.messages'::regclass;"""
+    check = """select count(*) from pg_publication_tables
+      where pubname='supabase_realtime' and schemaname='public' and tablename='messages';"""
+    identity = """select relreplident from pg_class
+      where oid='public.messages'::regclass;"""
+    if value(check) != "0" or value(identity) != "d":
+        # Established test stands already have an owner-managed stream.
+        yield
+        return
+    sql(f"""
+      begin;
+      alter table public.messages replica identity full;
+      alter publication supabase_realtime add table public.messages
+        where (chat_id='{chat}'::uuid);
+      commit;
+    """)
+    added = value(signature)
+    assert chat in added and value(identity) == "f"
+    try:
+        yield
+    finally:
+        if value(signature) != added or value(identity) != "f":
+            raise RuntimeError("Local Realtime fixture changed; preserving current definition")
+        sql("""
+          begin;
+          alter publication supabase_realtime drop table public.messages;
+          alter table public.messages replica identity default;
+          commit;
+        """)
+        assert value(check) == "0" and value(identity) == "d"
+        print("PASS restored original local Realtime publication and replica identity", flush=True)
 
 def main():
     compose = sys.argv[1:2] == ["--compose"]
@@ -74,9 +113,10 @@ def main():
             target = ["test/ordinary_chat_list_actions_local_test.dart"]
         else:
             target = ["test/online_chat_switch_local_test.dart"]
-        return subprocess.call(["flutter.bat" if os.name == "nt" else "flutter", "test", "--no-pub",
-                                "--reporter=expanded", *target],
-                               cwd=ROOT, env=env)
+        with (compose_publication(groups[0]["chat"]) if compose else nullcontext()):
+            return subprocess.call(["flutter.bat" if os.name == "nt" else "flutter", "test", "--no-pub",
+                                    "--reporter=expanded", *target],
+                                   cwd=ROOT, env=env)
     finally:
         if seeded:
             # Notifications and their outbox rows are independent of chat FK cascades.

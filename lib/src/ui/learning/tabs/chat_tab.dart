@@ -237,6 +237,14 @@ class _ChatTabState extends State<ChatTab> {
   final Set<String> _requiredForwardFileIds = {};
   final _capsRepo = ChatComposerCapabilitiesRepository();
   ChatComposerCapabilities? _composerCaps;
+
+  bool get _readOnly {
+    final capabilities = _composerCaps;
+    return widget.readOnly ||
+        (capabilities != null && !capabilities.loading &&
+            !capabilities.fromCache &&
+            capabilities.reasonFor('propose_assignment') == 'not_member');
+  }
   bool _capsLoading = true;
   bool _canDeleteMessage(Message m) {
     final uid = Supabase.instance.client.auth.currentUser?.id;
@@ -654,6 +662,7 @@ class _ChatTabState extends State<ChatTab> {
 
     _keyboardChannel.setMethodCallHandler((call) async {
       if (call.method == 'onKeyboardImagePicked' || call.method == 'onPicked') {
+        if (!mounted || _readOnly || !_draftCanEdit) return null;
         final path = (call.arguments ?? '') as String;
         if (path.isNotEmpty && mounted) {
           // Добавляем файл в pending список
@@ -1411,7 +1420,7 @@ class _ChatTabState extends State<ChatTab> {
       if (_draftOwner != null && !_draftOwner!.canRead) return _draftUnavailable();
       final owner = _draftOwner ?? seed.confirm();
       if (owner == null || !owner.canRead) return _draftUnavailable();
-      _bindDraftOwner(owner);
+      setState(() => _bindDraftOwner(owner));
       unawaited(_loadRecoveryDrafts(owner, _currentChatId!));
       final Map<String, dynamic>? draft;
       try {
@@ -1574,7 +1583,8 @@ class _ChatTabState extends State<ChatTab> {
 
   void _send(BuildContext context) async {
     // защита от повторных тапов и отправки во время аплоада
-    if (_isUploadingAttachments || _hasFailedAttachments || _isSending) return;
+    if (_readOnly || !_draftCanEdit || _isUploadingAttachments ||
+        _hasFailedAttachments || _isSending) return;
 
     _isSending = true;
     setState(() {});
@@ -2136,7 +2146,7 @@ class _ChatTabState extends State<ChatTab> {
 
           // initialScrollOffset уже сдвигает в конец, доп.скролл не нужен
 
-          final readOnly = widget.readOnly;
+          final readOnly = _readOnly;
 
           return Column(
             children: [
@@ -2185,7 +2195,9 @@ class _ChatTabState extends State<ChatTab> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Семестр завершён. Чат доступен только для просмотра',
+                            widget.readOnly
+                                ? 'Только чтение. Семестр завершён.'
+                                : 'Только чтение. Отправка недоступна.',
                             style:
                                 Theme.of(context).textTheme.bodySmall?.copyWith(
                                       fontWeight: FontWeight.w600,
@@ -2296,11 +2308,6 @@ class _ChatTabState extends State<ChatTab> {
                           onRetryFailedText: (m) => context
                               .read<TeamCubit>()
                               .retryFailedTextMessage(m),
-                          onFocusComposer: () {
-                            _composerFocus.requestFocus();
-                            services.SystemChannels.textInput
-                                .invokeMethod('TextInput.show');
-                          },
                           onAttachFile: () {
                             // ignore: unawaited_futures
                             _pickAndUploadFileForComposer();
@@ -2389,14 +2396,23 @@ class _ChatTabState extends State<ChatTab> {
                     );
                   },
                 )
-              else if (!readOnly && !_draftCanEdit)
-                (_draftSeed?.sameEpoch ?? false)
-                    ? TextButton(onPressed: () => unawaited(_initDraftAndForward()),
-                        child: const Text('Черновик недоступен. Повторить'))
-                    : const Padding(padding: EdgeInsets.all(12),
-                        child: Text('Сессия изменилась. Закройте и откройте чат снова.'))
+              else if (!readOnly &&
+                  (_draftSeed?.matchesCurrentIdentity != true ||
+                      _draftOwner?.canRead == false))
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('Сессия изменилась. Закройте и откройте чат снова.'),
+                )
               else if (!readOnly)
                 ChatComposerBar(
+                  unavailableLabel: _draftCanEdit
+                      ? null
+                      : _draftError
+                          ? 'Не удалось открыть черновик. Повторить'
+                          : 'Подключение к чату…',
+                  onRetryAvailability: !_draftCanEdit && _draftError
+                      ? () => unawaited(_initDraftAndForward())
+                      : null,
                   controller: _ctrl,
                   focusNode: _composerFocus,
                   replyTo: _replyTo,
@@ -2709,6 +2725,15 @@ class _ChatTabState extends State<ChatTab> {
 
   Future<void> _loadComposerCapabilities() async {
     if (!mounted) return;
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    final generation = scope?.generation;
+    final owner = Supabase.instance.client.auth.currentUser?.id;
+    bool current() =>
+        mounted &&
+        owner != null &&
+        Supabase.instance.client.auth.currentUser?.id == owner &&
+        scope?.generation == generation;
+    if (!current()) return;
     final teamState = context.read<TeamCubit>().state;
     final team = teamState.team;
     final structural = ChatComposerCapabilities.structuralLoading(
@@ -2720,13 +2745,13 @@ class _ChatTabState extends State<ChatTab> {
       try {
         final chatId = await _getChatIdForTeam(team.id);
         final cached = await _capsRepo.peekCache(chatId);
-        if (!mounted) return;
+        if (!current()) return;
         setState(() {
           _composerCaps = cached ?? structural;
           _capsLoading = cached == null;
         });
       } catch (_) {
-        if (!mounted) return;
+        if (!current()) return;
         setState(() {
           _composerCaps = structural;
           _capsLoading = true;
@@ -2745,13 +2770,13 @@ class _ChatTabState extends State<ChatTab> {
         fallbackTeamKind: team.kind,
         localIsOrganizer: teamState.isStarosta,
       );
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
         _composerCaps = caps;
         _capsLoading = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!current()) return;
       setState(() => _capsLoading = false);
     }
   }

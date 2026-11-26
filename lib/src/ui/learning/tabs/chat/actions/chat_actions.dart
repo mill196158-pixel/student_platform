@@ -246,8 +246,8 @@ class ChatActions {
   }) async {
     final result = await showGeneralDialog<_ChatActionsResult>(
       context: context,
-      barrierDismissible: false,
-      barrierLabel: 'message_actions',
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
       barrierColor: Colors.black.withValues(alpha: 0.35),
       pageBuilder: (ctx, anim1, anim2) {
         final mq = MediaQuery.of(ctx);
@@ -287,146 +287,148 @@ class ChatActions {
           value: context.read<TeamCubit>(),
           child: FadeTransition(
             opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic),
-            child: SafeArea(
-              child: Scaffold(
-                backgroundColor: Colors.transparent,
-                body: Stack(
-                  children: [
-                    // liquid glass + закрытие только по фону
-                    Positioned.fill(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => Navigator.pop(ctx),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                          child: Container(
-                            color: Colors.black.withValues(alpha: 0.35),
-                          ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: Stack(
+                children: [
+                  // The backdrop covers the system insets as well as the message list.
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        if (ModalRoute.isCurrentOf(ctx) == true) {
+                          Navigator.of(ctx).pop();
+                        }
+                      },
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                        child: Container(
+                          color: Colors.black.withValues(alpha: 0.35),
                         ),
                       ),
                     ),
+                  ),
 
-                    if (noRect)
-                      _buildCenteredOverlay(
-                        ctx: ctx,
-                        screenW: w,
-                        screenH: h,
-                        safeTop: safeTop,
-                        safeBottom: safeBottom,
-                        fallbackPosition: fallbackPosition,
-                        reactionH: reactionH,
-                        gapBetween: gapBetween,
-                        actionsFullH: actionsFullH,
-                        labels: labels,
-                        message: message,
-                        replyPreview: replyPreview,
-                        hasCopyable: hasCopyable,
-                        onReply: () => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(
-                            _ChatActionsResultKind.reply,
-                          ),
-                        ),
-                        onForward: () => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(
-                            _ChatActionsResultKind.forward,
-                          ),
-                        ),
-                        onReact: (emoji) => _completeAction(
-                          ctx,
-                          _ChatActionsResult(
-                            _ChatActionsResultKind.react,
-                            emoji: emoji,
-                          ),
-                        ),
-                        onTogglePin: () async => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(_ChatActionsResultKind.pin),
-                        ),
-                        onDeleteIfAllowed: () async => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(
-                            _ChatActionsResultKind.delete,
-                          ),
-                        ),
-                        onEditIfAllowed: hasEdit
-                            ? () async => _completeAction(
-                                  ctx,
-                                  const _ChatActionsResult(
-                                    _ChatActionsResultKind.edit,
-                                  ),
-                                )
-                            : null,
-                        onSelect: () => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(
-                            _ChatActionsResultKind.select,
-                          ),
-                        ),
-                      )
-                    else
-                      _buildAnchoredOverlay(
-                        ctx: ctx,
-                        screenW: w,
-                        screenH: h,
-                        safeTop: safeTop,
-                        safeBottom: safeBottom,
-                        bubble: targetRect,
-                        reactionH: reactionH,
-                        gapBubble: gapBubble,
-                        gapBetween: gapBetween,
-                        actionsFullH: actionsFullH,
-                        labels: labels,
-                        message: message,
-                        replyPreview: replyPreview,
-                        hasCopyable: hasCopyable,
-                        onReply: () => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(
-                            _ChatActionsResultKind.reply,
-                          ),
-                        ),
-                        onForward: () => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(
-                            _ChatActionsResultKind.forward,
-                          ),
-                        ),
-                        onReact: (emoji) => _completeAction(
-                          ctx,
-                          _ChatActionsResult(
-                            _ChatActionsResultKind.react,
-                            emoji: emoji,
-                          ),
-                        ),
-                        onTogglePin: () async => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(_ChatActionsResultKind.pin),
-                        ),
-                        onDeleteIfAllowed: () async => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(
-                            _ChatActionsResultKind.delete,
-                          ),
-                        ),
-                        onEditIfAllowed: hasEdit
-                            ? () async => _completeAction(
-                                  ctx,
-                                  const _ChatActionsResult(
-                                    _ChatActionsResultKind.edit,
-                                  ),
-                                )
-                            : null,
-                        onSelect: () => _completeAction(
-                          ctx,
-                          const _ChatActionsResult(
-                            _ChatActionsResultKind.select,
-                          ),
+                  if (noRect)
+                    _buildCenteredOverlay(
+                      ctx: ctx,
+                      screenW: w,
+                      screenH: h,
+                      safeTop: safeTop,
+                      safeBottom: safeBottom,
+                      fallbackPosition: fallbackPosition,
+                      reactionH: reactionH,
+                      gapBetween: gapBetween,
+                      actionsFullH: actionsFullH,
+                      labels: labels,
+                      message: message,
+                      replyPreview: replyPreview,
+                      hasCopyable: hasCopyable,
+                      onReply: () => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(
+                          _ChatActionsResultKind.reply,
                         ),
                       ),
-                  ],
-                ),
+                      onForward: () => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(
+                          _ChatActionsResultKind.forward,
+                        ),
+                      ),
+                      onReact: (emoji) => _completeAction(
+                        ctx,
+                        _ChatActionsResult(
+                          _ChatActionsResultKind.react,
+                          emoji: emoji,
+                        ),
+                      ),
+                      onTogglePin: () async => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(_ChatActionsResultKind.pin),
+                      ),
+                      onDeleteIfAllowed: () async => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(
+                          _ChatActionsResultKind.delete,
+                        ),
+                      ),
+                      onEditIfAllowed: hasEdit
+                          ? () async => _completeAction(
+                                ctx,
+                                const _ChatActionsResult(
+                                  _ChatActionsResultKind.edit,
+                                ),
+                              )
+                          : null,
+                      onSelect: () => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(
+                          _ChatActionsResultKind.select,
+                        ),
+                      ),
+                    )
+                  else
+                    _buildAnchoredOverlay(
+                      ctx: ctx,
+                      screenW: w,
+                      screenH: h,
+                      safeTop: safeTop,
+                      safeBottom: safeBottom,
+                      bubble: targetRect,
+                      reactionH: reactionH,
+                      gapBubble: gapBubble,
+                      gapBetween: gapBetween,
+                      actionsFullH: actionsFullH,
+                      labels: labels,
+                      message: message,
+                      replyPreview: replyPreview,
+                      hasCopyable: hasCopyable,
+                      onReply: () => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(
+                          _ChatActionsResultKind.reply,
+                        ),
+                      ),
+                      onForward: () => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(
+                          _ChatActionsResultKind.forward,
+                        ),
+                      ),
+                      onReact: (emoji) => _completeAction(
+                        ctx,
+                        _ChatActionsResult(
+                          _ChatActionsResultKind.react,
+                          emoji: emoji,
+                        ),
+                      ),
+                      onTogglePin: () async => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(_ChatActionsResultKind.pin),
+                      ),
+                      onDeleteIfAllowed: () async => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(
+                          _ChatActionsResultKind.delete,
+                        ),
+                      ),
+                      onEditIfAllowed: hasEdit
+                          ? () async => _completeAction(
+                                ctx,
+                                const _ChatActionsResult(
+                                  _ChatActionsResultKind.edit,
+                                ),
+                              )
+                          : null,
+                      onSelect: () => _completeAction(
+                        ctx,
+                        const _ChatActionsResult(
+                          _ChatActionsResultKind.select,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),

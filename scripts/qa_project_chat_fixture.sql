@@ -31,6 +31,8 @@ language sql stable set search_path from current as $$
   where o.id=p_subject_offering_id and e.user_id=auth.uid() and e.status='active' and e.ended_at is null $$;
 create table teams(id uuid primary key,subject_offering_id uuid references subject_offerings,name text,teacher text,icon text,
     group_name text,kind text default 'subject');
+alter table teams add column group_id uuid, add column subject_id uuid,
+    add column academic_year_id uuid, add column academic_term_id uuid, add column semester_number integer;
 insert into teams(id,subject_offering_id,name,group_name) values
   (':team_project:',':off_project:','Сопромат', 'QA BRIDGE GROUP'),
   (':team_control:',':off_control:','Курсовой проект и практика','QA BRIDGE GROUP');
@@ -62,6 +64,25 @@ create table chat_files(id uuid primary key, chat_id uuid references chats, file
 insert into chat_files(id,chat_id,file_name,file_key,file_url,uploaded_by) values
   (':file_project:',':chat_project:','Расчётная записка.pdf',':file_project:',':base:/project.pdf',':student:'),
   (':file_control:',':chat_control:','Расчётная записка.pdf',':file_control:',':base:/control.pdf',':student:');
+create function get_my_chat_summaries() returns table(chat_id uuid, chat_type text, team_id uuid,
+    team_name text, title text, settings_exists boolean, unread_count int)
+language sql stable set search_path from current as $$
+  select v.chat_id,'team_main',v.team_id,v.subject_title,v.subject_title,true,0
+  from rpc_get_my_subjects_v2() v $$;
+create table fixture_team_write_denials (team_id uuid primary key);
+create function fixture_deny_project_writes() returns void
+language sql security definer set search_path from current as $$
+  insert into fixture_team_write_denials(team_id)
+    select ':team_project:' where auth.uid()=':student:'
+  on conflict do nothing $$;
+create function get_chat_composer_capabilities(p_chat_id uuid) returns jsonb
+language sql stable set search_path from current as $$
+  select jsonb_build_object('chat_type','team','team_kind','subject',
+    'is_active_member',d.team_id is null,
+    'reasons', case when d.team_id is null then '{}'::jsonb
+                    else jsonb_build_object('propose_assignment','not_member') end)
+  from rpc_get_my_subjects_v2() v left join fixture_team_write_denials d on d.team_id=v.team_id
+  where v.chat_id=p_chat_id $$;
 grant select on all tables in schema :schema: to authenticated;
 revoke execute on all functions in schema :schema: from public,anon;
 grant execute on all functions in schema :schema: to authenticated;

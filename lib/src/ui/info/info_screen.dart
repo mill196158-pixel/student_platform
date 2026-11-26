@@ -1215,10 +1215,6 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
     AsyncSnapshot<InfoPlanState> snapshot,
     InfoPlanState? state,
   ) {
-    if (snapshot.connectionState != ConnectionState.done) {
-      return const Center(child: ProductLoadingIndicator.page());
-    }
-
     if (_section == _UsefulSection.help) {
       return _PullSearchHost(
         key: const ValueKey('help-search'),
@@ -1249,6 +1245,10 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
           ),
         ],
       );
+    }
+
+    if (snapshot.connectionState != ConnectionState.done) {
+      return const Center(child: ProductLoadingIndicator.page());
     }
 
     if (state == null) {
@@ -3172,6 +3172,7 @@ class _EmptyState extends StatelessWidget {
 
 Future<_UsefulSection?> _showInfoSectionPicker(
     BuildContext context, _UsefulSection selected) {
+  FocusManager.instance.primaryFocus?.unfocus();
   return showModalBottomSheet<_UsefulSection>(
     context: context,
     showDragHandle: true,

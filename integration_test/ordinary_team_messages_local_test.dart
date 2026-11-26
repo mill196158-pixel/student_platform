@@ -15,6 +15,7 @@ import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/themes/themes.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:student_platform/src/ui/learning/team_details_screen.dart';
+import 'package:student_platform/src/ui/learning/models/team.dart';
 import 'package:student_platform/src/ui/learning/state/team_cubit.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -154,7 +155,7 @@ void main() {
       Future<List> history() async =>
           await peer.rpc('get_chat_messages_page', params: {'p_chat_id': chat})
               as List;
-      await peerSend(initial);
+
       await tester.pumpWidget(
           const AuthSessionScopeHost(child: SizedBox(key: Key('session'))));
       await AuthSessionScopeHost.maybeRead(
@@ -171,26 +172,35 @@ void main() {
         expect(done(), isTrue, reason: reason);
       }
 
-      final row = find.byKey(ValueKey(chat));
+      final row = find.byKey(ValueKey<String>(chat));
       final screen = find.byType(TeamDetailsScreen);
       final composer =
           find.descendant(of: screen, matching: find.byType(EditableText));
+      Future<void> waitHistory(String text) => wait(
+          () =>
+              screen.evaluate().isNotEmpty &&
+              find.descendant(of: screen, matching: find.text(text))
+                  .evaluate().isNotEmpty &&
+              composer.hitTestable().evaluate().length == 1,
+          'History and enabled composer');
       Future<void> open() async {
         await wait(() => row.evaluate().isNotEmpty, 'Chat list');
         await tester.ensureVisible(row);
         await tester.tap(row);
-        await wait(
-            () =>
-                find.byType(TeamDetailsScreen).evaluate().isNotEmpty &&
-                find
-                    .descendant(of: screen, matching: find.text(initial))
-                    .evaluate()
-                    .isNotEmpty &&
-                composer.evaluate().length == 1,
-            'Initial history');
+        await waitHistory(initial);
       }
 
-      await open();
+      // The ordinary team route also opens courses with no activity yet.
+      // After the first message, reopen via the live chat list below.
+      final chats = tester.element(find.byType(MyChatsScreen));
+      unawaited(Navigator.of(chats).push<void>(MaterialPageRoute(
+        builder: (_) => TeamDetailsScreen(team: Team(
+          id: team, name: 'QA $team', teacher: '', groupCode: 'QA $team', icon: '',
+        )),
+      )));
+      await waitHistory('Сообщений пока нет');
+      expect(find.text('Написать'), findsNothing);
+      expect(composer.hitTestable(), findsOneWidget);
       await tester.enterText(composer, outgoing);
       await tester.pump();
       final send =
@@ -208,9 +218,13 @@ void main() {
       client.pending.release.complete();
       await wait(
           () => find.text(outgoing).evaluate().isNotEmpty, 'Sent message');
+      await wait(() => find.text(outgoing).evaluate().length == 1,
+          'The first message must have exactly one bubble after confirmation');
       final sent = (await history()).where((r) => r['text'] == outgoing).single;
       expect(sent['author_id'], me.auth.currentUser!.id);
       expect(client.sends, 1);
+      debugPrint('PASS iPhone chat note 4: one composer in empty chat, first send and one server row');
+      await peerSend(initial);
       final reply = await peerSend(incoming, replyTo: sent['id'] as String);
       await wait(() => find.text(incoming).evaluate().isNotEmpty,
           'Reply in the open conversation');
@@ -236,6 +250,13 @@ void main() {
           isEmpty);
       final page = await history();
       expect(page.where((r) => r['text'] == outgoing), hasLength(1));
+      final reopened = tester.element(composer).read<TeamCubit>();
+      expect(reopened.state.chat.where((message) => message.text == outgoing)
+          .map((message) => message.id), [sent['id']]);
+      final sentBubble = find.byKey(ValueKey<String>('message-${sent['id']}'));
+      expect(find.descendant(of: sentBubble, matching: find.text(outgoing)),
+          findsOneWidget);
+      debugPrint('PASS iPhone chat note 3: one bubble and one server row after delayed acknowledgement and reopening');
       expect(page.where((r) => r['id'] == reply).single['reply_to_id'],
           sent['id']);
       expect(page.where((r) => r['text'] == nextDraft), isEmpty);
@@ -311,6 +332,11 @@ void main() {
             reason: 'A confirmed message must leave its pending state');
         expect(bubble.isLocal || bubble.isSending || bubble.isFailed, isFalse);
         expect(client.sends, 4);
+        final repeated = await withoutRealtime.sendMessage('me', text);
+        final identical = (await history()).where((r) => r['text'] == text);
+        expect(identical.map((r) => r['id']).toSet(), {result, repeated});
+        expect(withoutRealtime.state.chat.where((m) => m.text == text), hasLength(2));
+        debugPrint('PASS iPhone chat note 3: two deliberate sends with identical text retain two server IDs');
       } finally {
         client.interruptHydration = false;
         await withoutRealtime.close();
