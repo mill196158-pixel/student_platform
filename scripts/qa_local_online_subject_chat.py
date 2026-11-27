@@ -41,6 +41,70 @@ def include_realtime_author(author):
         print("PASS original local Realtime publication restored", flush=True)
 
 
+@contextmanager
+def restart_chat_summaries():
+    """Give the minimal local database the active-chat projection for this test."""
+    stub = """
+        select 1 from pg_proc
+        where oid = 'public.get_my_chat_summaries()'::regprocedure
+          and pg_get_function_result(oid) = 'TABLE(chat_id uuid)'
+          and btrim(prosrc, E' \\n\\r\\t') = 'select null::uuid where false;'
+    """
+    needs_fixture = sql(
+        "select 'restart_stub_present' where exists (" + stub + ");"
+    )
+    if "restart_stub_present" not in needs_fixture:
+        yield
+        return
+    sql("""
+        begin;
+        do $$ begin
+          if not exists (""" + stub + """) then
+            raise exception 'Local chat summaries changed during fixture setup';
+          end if;
+        end $$;
+        drop function public.get_my_chat_summaries();
+        create function public.get_my_chat_summaries()
+        returns table(chat_id uuid, team_id uuid, chat_type text)
+        language sql stable security definer set search_path = '' as $$
+          -- restart_test_fixture
+          select c.id, c.team_id, c.type::text
+          from public.chats c
+          join public.team_members tm on tm.team_id = c.team_id
+          where tm.user_id = auth.uid() and c.type = 'team_main'
+            and not exists (
+              select 1 from public.chat_academic_archives a where a.chat_id = c.id
+            )
+        $$;
+        revoke all on function public.get_my_chat_summaries() from public, anon;
+        grant execute on function public.get_my_chat_summaries() to authenticated;
+        notify pgrst, 'reload schema';
+        commit;
+    """)
+    try:
+        yield
+    finally:
+        sql("""
+            begin;
+            do $$ begin
+              if not exists (
+                select 1 from pg_proc
+                where oid = 'public.get_my_chat_summaries()'::regprocedure
+                  and position('restart_test_fixture' in prosrc) > 0
+              ) then raise exception 'Local chat summaries fixture was replaced';
+              end if;
+            end $$;
+            drop function public.get_my_chat_summaries();
+            create function public.get_my_chat_summaries()
+            returns table(chat_id uuid)
+            language sql security definer set search_path = '' as $$
+              select null::uuid where false;
+            $$;
+            notify pgrst, 'reload schema';
+            commit;
+        """)
+
+
 def run_fresh(args):
     from contextlib import ExitStack
     from secrets import token_urlsafe
@@ -204,7 +268,11 @@ def main():
                     ('{ids['eventEdit']}','{chat}','{peer}','Peer original marker','Peer original marker'),
                     ('{ids['eventDelete']}','{chat}','{peer}','Peer to remove marker','Peer to remove marker');""")
             from tempfile import TemporaryDirectory
-            with (include_realtime_author(peer) if events else nullcontext()), TemporaryDirectory(prefix="history-", dir=run_dir) as directory:
+            with (
+                restart_chat_summaries(),
+                (include_realtime_author(peer) if events else nullcontext()),
+                TemporaryDirectory(prefix="history-", dir=run_dir) as directory,
+            ):
                 env["STUDENT_RESTART_STORAGE"] = directory
                 for phase in (("clean-device",) if "--clean-device" in sys.argv else ("online", "offline")):
                     env["STUDENT_RESTART_PHASE"] = phase

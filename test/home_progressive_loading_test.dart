@@ -10,7 +10,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_platform/src/core/qa_online_side_effect_coordinator.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
+import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/schedule/schedule_screen.dart';
 import 'package:student_platform/src/ui/schedule/models/lesson.dart';
@@ -112,16 +114,234 @@ class GatedPublicImages extends PublicNewsImageCache {
   Future<NewsImageReadResult> read(NewsImageCacheKey key,
       {Future<Uint8List?> Function()? legacyFallback}) async {
     final bytes = await disk.peek(key);
-    return bytes == null ? const NewsImageReadResult(NewsImageReadState.miss)
+    return bytes == null
+        ? const NewsImageReadResult(NewsImageReadState.miss)
         : NewsImageReadResult(NewsImageReadState.hit, bytes);
   }
+
   @override
-  Future<Uint8List?> getOrFetch(NewsImageCacheKey key,
-      Future<Uint8List?> Function() fetch) => disk.getOrFetch(key, fetch);
+  Future<Uint8List?> getOrFetch(
+          NewsImageCacheKey key, Future<Uint8List?> Function() fetch) =>
+      disk.getOrFetch(key, fetch);
+}
+
+class _StoryClient extends http.BaseClient {
+  _StoryClient(this.onRequest);
+
+  final Future<http.StreamedResponse> Function(http.AbortableRequest) onRequest;
+  final requests = <http.AbortableRequest>[];
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    expect(request, isA<http.AbortableRequest>());
+    final abortable = request as http.AbortableRequest;
+    expect(abortable.abortTrigger, isNotNull);
+    expect(abortable.followRedirects, isFalse);
+    requests.add(abortable);
+    return onRequest(abortable);
+  }
+}
+
+http.StreamedResponse _signingResponse(String url) => http.StreamedResponse(
+    Stream.value(utf8.encode(jsonEncode({'signedUrl': url}))), 200);
+
+final _story = mapPublishedNews({
+  'id': 'fixture-news',
+  'title': 'Cover',
+  'image_path': '0',
+  'variant': 'imageOverlay',
+  'updated_at': '2026-11-27T00:00:00Z',
+});
+
+HomeDashboardService _storyService(SupabaseClient client, _StoryClient http) {
+  final disk = GatedDiskReads()..gates.first.complete(null);
+  final service = HomeDashboardService(
+    client: client,
+    httpClient: http,
+    scheduleRepository: Schedule(),
+    learningRepository: Learning(),
+    publicImageCache: GatedPublicImages(disk),
+  );
+  addTearDown(service.dispose);
+  return service;
+}
+
+class _IndependentSnapshot extends HomeSnapshotCache {
+  _IndependentSnapshot(SupabaseClient client)
+      : super(
+          currentUserId: () => client.auth.currentUser?.id,
+          sessionGeneration: () => 0,
+          sessionIdentity: () => client,
+        );
+
+  final delayedSchedule = Completer<HomeSectionSnapshot?>();
+
+  @override
+  Future<HomeSectionSnapshot?> read(
+      String owner, HomeSnapshotSection section) async {
+    switch (section) {
+      case HomeSnapshotSection.profile:
+        return HomeSectionSnapshot(savedAt: DateTime.utc(2026), items: [
+          {'id': owner, 'name': 'Saved owner'}
+        ]);
+      case HomeSnapshotSection.schedule:
+        return delayedSchedule.future;
+      case HomeSnapshotSection.assignments:
+        return null;
+    }
+  }
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('guarded cover rejects a foreign URL and sends session only to signer',
+      () async {
+    final client = SupabaseClient('https://example.test', 'fixture-key',
+        authOptions: const AuthClientOptions(autoRefreshToken: false));
+    addTearDown(client.dispose);
+    await signIn(client, 'a');
+    final coordinator = QaOnlineSideEffectCoordinator();
+    addTearDown(coordinator.dispose);
+    bool current() => client.auth.currentUser?.id == 'a';
+    final barrier = coordinator.open(current)!;
+    var signedUrl = 'https://wrong.example/cover';
+    final transport = _StoryClient((request) async {
+      if (request.method == 'POST') return _signingResponse(signedUrl);
+      return http.StreamedResponse(Stream.value([1, 2, 3]), 200);
+    });
+    final service = _storyService(client, transport);
+
+    for (final rejected in [
+      'https://wrong.example/cover',
+      'https://userinfo@example.test/cover',
+      'http://example.test/cover',
+      'https://example.test:444/cover',
+    ]) {
+      signedUrl = rejected;
+      expect(
+          await service.resolveGuardedStoryImage(_story, barrier,
+              current: current),
+          isNull);
+    }
+    expect(transport.requests.map((r) => r.method), List.filled(4, 'POST'));
+    signedUrl = 'https://example.test/storage/cover';
+    expect(
+        await service.resolveGuardedStoryImage(_story, barrier,
+            current: current),
+        [1, 2, 3]);
+    final signer = transport.requests[4], cover = transport.requests[5];
+    expect(
+        signer.url, Uri.parse('https://example.test/functions/v1/news-media'));
+    expect(signer.headers['apikey'], 'fixture-key');
+    expect(signer.headers['authorization'],
+        'Bearer ${client.auth.currentSession!.accessToken}');
+    expect(jsonDecode(signer.body), {'action': 'createDownload', 'path': '0'});
+    expect(cover.url, Uri.parse(signedUrl));
+    expect(cover.headers['authorization'], isNull);
+    expect(cover.headers['apikey'], isNull);
+    expect(barrier.activeCount, 0);
+  });
+
+  for (final stalledMethod in ['POST', 'GET']) {
+    test(
+        'closing session aborts stalled cover $stalledMethod and permits next session',
+        () async {
+      final client = SupabaseClient('https://example.test', 'fixture-key',
+          authOptions: const AuthClientOptions(autoRefreshToken: false));
+      addTearDown(client.dispose);
+      await signIn(client, 'a');
+      final coordinator = QaOnlineSideEffectCoordinator();
+      addTearDown(coordinator.dispose);
+      bool current() => client.auth.currentUser?.id == 'a';
+      final barrier = coordinator.open(current)!;
+      final waiting = Completer<void>();
+      final aborted = Completer<void>();
+      final transport = _StoryClient((request) async {
+        final abort = request.abortTrigger!;
+        if (request.method == 'POST') {
+          if (stalledMethod == 'GET') {
+            return _signingResponse('https://example.test/storage/cover');
+          }
+          waiting.complete();
+          await abort;
+          aborted.complete();
+          throw http.RequestAbortedException(request.url);
+        }
+        // Headers arrived, while the cover body is still waiting for bytes.
+        final body = StreamController<List<int>>(onListen: waiting.complete);
+        unawaited(abort.then((_) async {
+          aborted.complete();
+          body.addError(http.RequestAbortedException(request.url));
+          await body.close();
+        }));
+        return http.StreamedResponse(body.stream, 200);
+      });
+      final service = _storyService(client, transport);
+      final cover =
+          service.resolveGuardedStoryImage(_story, barrier, current: current);
+      await waiting.future.timeout(const Duration(seconds: 1));
+      expect(barrier.activeCount, 1);
+      expect(aborted.isCompleted, isFalse);
+      await signIn(client, 'b');
+      expect(
+          await coordinator.closeAndWait(timeout: const Duration(seconds: 1)),
+          isTrue);
+      expect(await cover, isNull);
+      expect(aborted.isCompleted, isTrue);
+      expect(barrier.activeCount, 0);
+      expect(coordinator.open(() => client.auth.currentUser?.id == 'b'),
+          isNotNull);
+    });
+  }
+
+  test('saved profile paints while unrelated disk reads and live profile wait',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final fresh = Completer<void>();
+    final client = SupabaseClient('https://example.test', 'test',
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+        httpClient: MockClient((request) async {
+      final profile = request.url.path.endsWith('get_my_profile');
+      if (profile) await fresh.future;
+      return http.Response(
+          profile ? '[{"id":"a","name":"Fresh owner"}]' : '[]', 200,
+          request: request, headers: {'content-type': 'application/json'});
+    }));
+    addTearDown(client.dispose);
+    await signIn(client, 'a');
+    final cache = _IndependentSnapshot(client);
+    final schedule = Schedule()..result.complete([]);
+    final learning = Learning();
+    for (final gate in learning.gates) {
+      gate.complete([]);
+    }
+    final service = HomeDashboardService(
+        client: client,
+        scheduleRepository: schedule,
+        learningRepository: learning,
+        snapshotCache: cache);
+    addTearDown(service.dispose);
+    final saved = Completer<HomeDashboardData>();
+    final updated = Completer<HomeDashboardData>();
+    final result = service.load(onUpdate: (data) {
+      if (data.profile.name == 'Saved owner' && !saved.isCompleted)
+        saved.complete(data);
+      if (data.profile.name == 'Fresh owner' && !updated.isCompleted)
+        updated.complete(data);
+    });
+    expect(
+        (await saved.future.timeout(const Duration(milliseconds: 700)))
+            .profile
+            .id,
+        'a');
+    expect(cache.delayedSchedule.isCompleted, isFalse);
+    expect(fresh.isCompleted, isFalse);
+    fresh.complete();
+    await updated.future.timeout(const Duration(milliseconds: 700));
+    cache.delayedSchedule.complete(null);
+    expect((await result).profile.name, 'Fresh owner');
+  });
+
   test('cached covers read in bounded parallel order and tolerate a failure',
       () async {
     SharedPreferences.setMockInitialValues({

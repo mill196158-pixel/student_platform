@@ -442,9 +442,7 @@ class ChatMessageList extends StatelessWidget {
               onReact: () => onReact(ctx, m.id),
               onRetryFailed:
                   m.isFailed ? () => onRetryFailedText?.call(m) : null,
-              selected: ((selectingMessages &&
-                      (selectedMessageIds?.contains(m.id) ?? false)) ||
-                  hoveredMessageId == m.id),
+              selected: !selectingMessages && hoveredMessageId == m.id,
               boundaryKey: null,
               receiptTicks: receiptTicks,
               canModerateTopicSelection: canModerateTopicSelection,
@@ -546,6 +544,7 @@ class ChatMessageList extends StatelessWidget {
                               child: LocalReactionOverlayScope(child: bubbleWithKey),
                             )
                           : SwipeToReply(
+                              enabled: !selectingMessages,
                               onReply: () => onReply(m),
                               child: SearchHighlight(
                                 active: search.isActive,
@@ -770,7 +769,13 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final applyHighlight = (selectingMessages && isSelected) || isHovered;
+    final needsSelectionGutter = message.cardKind == 'topic_selection' ||
+        message.cardKind == 'collection' ||
+        (message.type == MessageType.forward && message.forward != null);
+    final indicatorAtStart = isMine ||
+        needsSelectionGutter ||
+        message.type == MessageType.assignmentDraft ||
+        message.type == MessageType.assignmentPublished;
     final hasReactions = reactions.isNotEmpty;
     final controller = _buildPackageController();
     ValueNotifier<Offset?>? dragPosition;
@@ -884,74 +889,73 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            if (applyHighlight)
+            if (!selectingMessages && isHovered)
               Positioned.fill(
                 child: IgnorePointer(
                   child: Padding(
-                    padding: selectingMessages
-                        ? const EdgeInsets.fromLTRB(6, 3, 8, 3)
-                        : EdgeInsets.only(
-                            left: isMine ? 44 : 0,
-                            right: isMine ? 0 : 44,
-                          ),
+                    padding: EdgeInsets.only(
+                      left: isMine ? 44 : 0,
+                      right: isMine ? 0 : 44,
+                    ),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: isSelected
-                              ? 0.16
-                              : (selectingMessages ? 0.04 : 0.045),
-                        ),
-                        borderRadius: BorderRadius.circular(
-                          selectingMessages ? 22 : 20,
-                        ),
+                        color: theme.colorScheme.primary.withValues(alpha: 0.045),
+                        borderRadius: BorderRadius.circular(20),
                       ),
                     ),
                   ),
                 ),
               ),
+            // Full-width cards need room for the indicator in both modes so
+            // that selecting a card leaves its width and line breaks intact.
             Padding(
-              padding: EdgeInsets.only(left: selectingMessages ? 40 : 0),
+              padding: EdgeInsetsDirectional.only(
+                start: needsSelectionGutter ? 26 : 0,
+              ),
               child: IgnorePointer(
                 ignoring: selectingMessages,
                 child: child,
               ),
             ),
             if (selectingMessages)
-              Positioned(
-                left: 10,
+              PositionedDirectional(
+                start: indicatorAtStart ? 4 : null,
+                end: indicatorAtStart ? null : 4,
                 top: 0,
-                bottom: hasReactions ? 10 : 0,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: _SelectionIndicator(
-                    selected: isSelected,
+                bottom: 0,
+                child: IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: Center(
+                      child: _SelectionIndicator(selected: isSelected),
+                    ),
                   ),
                 ),
               ),
             if (hasReactions)
               Positioned(
-                left: selectingMessages && reactionLeft != null
-                    ? reactionLeft! + 40
-                    : reactionLeft,
+                left: reactionLeft,
                 right: reactionRight,
                 bottom: -10,
-                child: fcr.StackedReactions(
-                  messageId: message.id,
-                  controller: controller,
-                  size: 27,
-                  stackedValue: 5,
-                  maxReactionsToShow: 4,
-                  direction: isMine ? TextDirection.rtl : TextDirection.ltr,
-                  reactionBackgroundColor: theme.colorScheme.surface,
-                  onTap: onReact,
-                  customReactionBuilder: (emoji, count, isUserReacted) {
-                    return _MessageReactionBubble(
-                      emoji: emoji,
-                      count: count,
-                      selected: isUserReacted,
-                      isMine: isMine,
-                    );
-                  },
+                child: IgnorePointer(
+                  ignoring: selectingMessages,
+                  child: fcr.StackedReactions(
+                    messageId: message.id,
+                    controller: controller,
+                    size: 27,
+                    stackedValue: 5,
+                    maxReactionsToShow: 4,
+                    direction: isMine ? TextDirection.rtl : TextDirection.ltr,
+                    reactionBackgroundColor: theme.colorScheme.surface,
+                    onTap: onReact,
+                    customReactionBuilder: (emoji, count, isUserReacted) {
+                      return _MessageReactionBubble(
+                        emoji: emoji,
+                        count: count,
+                        selected: isUserReacted,
+                        isMine: isMine,
+                      );
+                    },
+                  ),
                 ),
               ),
           ],
@@ -959,7 +963,10 @@ class _ChatMessageInteractionWrapper extends StatelessWidget {
       ),
     );
 
-    return visualChild;
+    return Semantics(
+      selected: selectingMessages ? isSelected : null,
+      child: visualChild,
+    );
   }
 
   fcr.ReactionsController _buildPackageController() {
@@ -1319,28 +1326,25 @@ class _SelectionIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 140),
-      width: 22,
-      height: 22,
+    return Container(
+      width: 19,
+      height: 19,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         color: selected ? scheme.primary : Colors.transparent,
         shape: BoxShape.circle,
         border: Border.all(
-          color: selected
-              ? scheme.primary
-              : scheme.onSurface.withValues(alpha: 0.35),
-          width: 1.6,
+          color: selected ? scheme.primary : scheme.onSurfaceVariant,
+          width: 1.25,
         ),
       ),
-      alignment: Alignment.center,
       child: selected
-          ? const Icon(
+          ? Icon(
               Icons.check_rounded,
-              color: Colors.white,
-              size: 15,
+              color: scheme.onPrimary,
+              size: 14,
             )
-          : const SizedBox.shrink(),
+          : null,
     );
   }
 }
@@ -1946,6 +1950,7 @@ class _EmptyChatState extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final canContribute = onAttachFile != null || onCreateAssignment != null;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1976,18 +1981,20 @@ class _EmptyChatState extends StatelessWidget {
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 4),
-          Text(
-            isDirectChat
-                ? 'Напишите первое сообщение.'
-                : 'Обсуждайте предмет, прикрепляйте файлы и создавайте задания для группы.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: .62),
-              height: 1.25,
+          if (isDirectChat || canContribute) ...[
+            const SizedBox(height: 4),
+            Text(
+              onCreateAssignment == null
+                  ? 'Напишите первое сообщение.'
+                  : 'Обсуждайте предмет, прикрепляйте файлы и создавайте задания для группы.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurface.withValues(alpha: .62),
+                height: 1.25,
+              ),
+              textAlign: TextAlign.center,
             ),
-            textAlign: TextAlign.center,
-          ),
-          if (onAttachFile != null || onCreateAssignment != null) ...[
+          ],
+          if (canContribute) ...[
             const SizedBox(height: 16),
             Wrap(
               alignment: WrapAlignment.center,
@@ -2009,7 +2016,7 @@ class _EmptyChatState extends StatelessWidget {
               ],
             ),
           ],
-          if (!isDirectChat) ...[
+          if (!isDirectChat && canContribute) ...[
             const SizedBox(height: 10),
             Text(
               'Файлы появятся во вкладке «Файлы», а задания — во вкладке «Задания».',

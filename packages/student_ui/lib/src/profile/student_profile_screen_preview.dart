@@ -304,10 +304,11 @@ class _SoftHeader extends StatelessWidget {
       if (group.isNotEmpty) 'группа $group',
     ].join(', ');
 
-    ImageProvider? avatarProvider = avatarImage;
-    if (avatarBytes != null && avatarBytes!.isNotEmpty) {
-      avatarProvider = MemoryImage(avatarBytes!);
-    } else if (avatarProvider == null) {
+    final bytes = avatarBytes;
+    final savedAvatar =
+        bytes != null && bytes.isNotEmpty ? MemoryImage(bytes) : null;
+    ImageProvider? avatarProvider = savedAvatar == null ? avatarImage : null;
+    if (savedAvatar == null && avatarProvider == null) {
       final url = avatarUrl?.trim();
       if (url != null && url.isNotEmpty) {
         avatarProvider = NetworkImage(url);
@@ -320,6 +321,8 @@ class _SoftHeader extends StatelessWidget {
           radius: 44,
           backgroundColor: StudentProfileScreenPreview._lavender,
           backgroundImage: avatarProvider,
+          foregroundImage: savedAvatar,
+          onForegroundImageError: savedAvatar == null ? null : (_, __) {},
           child: avatarProvider == null
               ? const Icon(Icons.person, size: 44, color: Color(0xFF6B7280))
               : null,
@@ -373,69 +376,76 @@ class _ActionsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: onMessagesTap ?? () {},
-                icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                label: const Text('Сообщения'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                  foregroundColor: Theme.of(context).colorScheme.primary,
-                  side: BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                  backgroundColor: Color.alphaBlend(
-                      const Color(0xFF7C63D8).withValues(alpha: 0.06),
-                      Theme.of(context).colorScheme.surface),
-                ),
+    final colors = Theme.of(context).colorScheme;
+    Widget action(
+        {required IconData icon,
+        required String label,
+        required Color accent,
+        required Color tint,
+        required int badge,
+        required int badgeMax,
+        bool badgeAtEnd = false,
+        VoidCallback? onTap}) {
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onTap ?? () {},
+              icon: Icon(icon, size: 18),
+              label: Text(label),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                foregroundColor: accent,
+                side: BorderSide(color: colors.outlineVariant),
+                backgroundColor: Color.alphaBlend(
+                    tint.withValues(alpha: 0.06), colors.surface),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: onFriendsTap ?? () {},
-                icon: const Icon(Icons.group_outlined, size: 18),
-                label: const Text('Друзья'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                  foregroundColor:
-                      Theme.of(context).brightness == Brightness.dark
-                          ? const Color(0xFF8BD9C4)
-                          : const Color(0xFF2F6B5E),
-                  side: BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                  backgroundColor: Color.alphaBlend(
-                      const Color(0xFF2F9D84).withValues(alpha: 0.06),
-                      Theme.of(context).colorScheme.surface),
-                ),
-              ),
-            ),
-          ],
-        ),
-        if (messagesBadge > 0)
-          Positioned(
-            left: 0,
-            top: -10,
-            child: _EdgeBadge(
-              text: messagesBadge > 99 ? '99+' : messagesBadge.toString(),
-            ),
           ),
-        if (friendsBadge > 0)
-          Positioned(
-            right: 0,
-            top: -10,
-            child: _EdgeBadge(
-              text: friendsBadge > 9 ? '9+' : friendsBadge.toString(),
-            ),
-          ),
-      ],
-    );
+          if (badge > 0)
+            PositionedDirectional(
+                start: badgeAtEnd ? null : 0,
+                end: badgeAtEnd ? 0 : null,
+                top: -10,
+                child: _EdgeBadge(
+                    text: badge > badgeMax ? '$badgeMax+' : '$badge')),
+        ],
+      );
+    }
+
+    final messages = action(
+        icon: Icons.chat_bubble_outline,
+        label: 'Сообщения',
+        accent: colors.primary,
+        tint: const Color(0xFF7C63D8),
+        badge: messagesBadge,
+        badgeMax: 99,
+        onTap: onMessagesTap);
+    final friends = action(
+        icon: Icons.group_outlined,
+        label: 'Друзья',
+        accent: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF8BD9C4)
+            : const Color(0xFF2F6B5E),
+        tint: const Color(0xFF2F9D84),
+        badge: friendsBadge,
+        badgeMax: 9,
+        badgeAtEnd: true,
+        onTap: onFriendsTap);
+    return LayoutBuilder(builder: (context, constraints) {
+      if (constraints.maxWidth <
+          260 * MediaQuery.textScalerOf(context).scale(14) / 14) {
+        return Column(
+            children: [messages, const SizedBox(height: 12), friends]);
+      }
+      return Row(children: [
+        Expanded(child: messages),
+        const SizedBox(width: 12),
+        Expanded(child: friends)
+      ]);
+    });
   }
 }
 

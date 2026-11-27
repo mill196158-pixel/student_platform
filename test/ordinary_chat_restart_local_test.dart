@@ -516,7 +516,7 @@ void main() {
       if (!offline) {
         expect(find.text('Написать'), findsNothing);
         expect(tester.getSize(find.byType(Scaffold).last).width, 390);
-        final composer = find.byType(EditableText).last;
+        final composer = find.byType(EditableText).hitTestable();
         await wait(composer);
         expect(composer.hitTestable(), findsOneWidget);
         await tester.tap(composer);

@@ -382,6 +382,7 @@ class _Body extends StatefulWidget {
 
 class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  late int _activeTabIndex;
   bool _selecting = false;
   String? _fileMessageId;
   int _fileMessageRequest = 0;
@@ -401,11 +402,17 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    final idx = widget.initialTabIndex.clamp(0, 2);
-    _tabController = TabController(length: 3, vsync: this, initialIndex: idx);
+    _activeTabIndex = widget.initialTabIndex.clamp(0, 2);
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: _activeTabIndex,
+    );
     _tabController.addListener(() {
-      setState(() {}); // чтобы trailing на «Заданиях» обновлялся
-      FocusScope.of(context).unfocus(); // закрыть клавиатуру при смене вкладки
+      final index = _tabController.index;
+      if (_activeTabIndex == index) return;
+      setState(() => _activeTabIndex = index);
+      FocusScope.of(context).unfocus();
     });
   }
 
@@ -421,12 +428,9 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
     final team = cubit.state.team;
     final theme = Theme.of(context);
 
-    final showAssignmentsActions = _tabController.index == 0;
-    // Когда открыта клавиатура (набор сообщения в чате), скрываем крупную
-    // шапку с названием команды, чтобы освободить место композеру и не
-    // получить overflow при добавлении вложений. Полоска вкладок остаётся.
-    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
-    final showHeader = !_selecting && !keyboardOpen;
+    final showAssignmentsActions = _activeTabIndex == 0;
+    final media = MediaQuery.of(context);
+    final headerHeight = media.size.height < 640 ? 48.0 : _kHeaderContentHeight;
 
     return Scaffold(
       body: Column(
@@ -434,24 +438,15 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
         children: [
           // В режиме выделения шапку заменяет TopSelectionBar внутри ChatTab.
           if (!_selecting) ...[
-            AnimatedSize(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              alignment: Alignment.topCenter,
-              child: showHeader
-                  ? SizedBox(
-                      height: MediaQuery.of(context).padding.top +
-                          _kHeaderContentHeight,
-                      child: _TeamHeader(
-                        team: team,
-                        leading:
-                            const _RoundBackButton(), // назад слева в шапке
-                        trailing: showAssignmentsActions
-                            ? const AssignmentsViewModeButton()
-                            : _TeamChatHeaderActions(team: team),
-                      ),
-                    )
-                  : const SizedBox(width: double.infinity, height: 0),
+            SizedBox(
+              height: media.padding.top + headerHeight,
+              child: _TeamHeader(
+                team: team,
+                leading: const _RoundBackButton(),
+                trailing: showAssignmentsActions
+                    ? const AssignmentsViewModeButton()
+                    : _TeamChatHeaderActions(team: team),
+              ),
             ),
             const SizedBox(height: _kTabsTopGap),
             // Сильно сжатый сегмент-контрол для вкладок (уменьшен на ~60%)
@@ -508,16 +503,18 @@ class _BodyState extends State<_Body> with SingleTickerProviderStateMixin {
               removeTop: true, // убрать любой верхний safe area у контента
               child: TabBarView(
                 controller: _tabController,
+                physics: _selecting ? const NeverScrollableScrollPhysics() : null,
                 children: [
                   AssignmentsTab(team: team),
                   ChatTab(
-                    isActive: _tabController.index == 1,
+                    key: ValueKey(team.id),
+                    isActive: _activeTabIndex == 1,
                     onSelectingChanged: (v) => setState(() => _selecting = v),
                     readOnly: widget.readOnly,
                     highlightMessageId: _fileMessageId ?? widget.highlightMessageId,
                     fileMessageRequest: _fileMessageRequest,
                   ),
-                  FilesTab(isActive: _tabController.index == 2, onOpenMessage: _openFileMessage),
+                  FilesTab(isActive: _activeTabIndex == 2, onOpenMessage: _openFileMessage),
                 ],
               ),
             ),

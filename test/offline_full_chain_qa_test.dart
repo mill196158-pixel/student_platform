@@ -51,6 +51,8 @@ class _Home implements CachedHomeScheduleReader {
   bool permitsContent(SessionCapabilities contentCapabilities, CapabilityPermit contentPermit) =>
       canRead && contentCapabilities.owns(contentPermit, owner);
   @override
+  Future<HomeUserProfile?> readProfile() async => (await readDashboard()).profile;
+  @override
   Future<HomeDashboardData> readDashboard({DateTime? date}) async =>
       HomeDashboardData(
         profile: const HomeUserProfile(id: 'qa-owner', name: 'Студент QA', groupName: 'Группа'),

@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:integration_test/integration_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:pdfrx/pdfrx.dart';
@@ -18,6 +19,7 @@ import 'package:student_platform/src/ui/chats/forward/forward_outbox_host.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/messages/chat_message_list.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_action_deeplink.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/selection_bars.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/composer/chat_composer_gate.dart';
 import 'package:student_platform/src/ui/authentication/screens/login_screen.dart';
 import 'package:student_platform/src/ui/info/subject_info_screen.dart';
@@ -28,6 +30,38 @@ import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'support/local_schema_http_client.dart';
+
+class _HeldMembership {
+  _HeldMembership(this.teamId);
+
+  final String teamId;
+  final received = Completer<void>();
+  final release = Completer<void>();
+}
+
+class _ProjectChatHttpClient extends LocalSchemaHttpClient {
+  _ProjectChatHttpClient(super.port);
+
+  _HeldMembership? holdMembership;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final held = holdMembership;
+    if (held != null &&
+        request.url.path == '/rest/v1/team_members' &&
+        request.url.queryParameters['select'] == 'team_id,user_id' &&
+        request.url.queryParameters['team_id'] == 'eq.${held.teamId}') {
+      holdMembership = null;
+      final response = await super.send(request);
+      final bytes = await response.stream.toBytes();
+      held.received.complete();
+      await held.release.future;
+      return http.StreamedResponse(Stream.value(bytes), response.statusCode,
+          headers: response.headers, request: request);
+    }
+    return super.send(request);
+  }
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -47,13 +81,14 @@ void main() {
     addTearDown(t.view.resetDevicePixelRatio);
     addTearDown(t.view.resetPhysicalSize);
     addTearDown(t.view.resetPadding);
+    addTearDown(t.view.resetViewInsets);
     await initializeDateFormatting('ru');
     SharedPreferences.setMockInitialValues({});
-    final http = LocalSchemaHttpClient(cfg['restPort'] as int);
+    final transport = _ProjectChatHttpClient(cfg['restPort'] as int);
     await Supabase.initialize(
         url: localSupabaseUrl,
         publishableKey: cfg['anon'] as String,
-        httpClient: http,
+        httpClient: transport,
         postgrestOptions:
             PostgrestClientOptions(schema: cfg['schema'] as String),
         authOptions: const FlutterAuthClientOptions(
@@ -63,18 +98,29 @@ void main() {
     final sb = Supabase.instance.client;
     File? verifiedExport;
     final captureBoundary = GlobalKey();
+    var captureUnavailable = false;
     Future<void> capture(String name) async {
       final directory = Platform.environment['STUDENT_PROJECT_CAPTURES'];
-      if (directory == null) return;
+      if (directory == null || captureUnavailable) return;
       final boundary = captureBoundary.currentContext!.findRenderObject()!
           as RenderRepaintBoundary;
-      final image = await boundary.toImage();
+      Future<void> writeImage() async {
+        final image = await boundary.toImage();
+        try {
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          if (!captureUnavailable) {
+            await File('$directory/$name.png')
+                .writeAsBytes(bytes!.buffer.asUint8List());
+          }
+        } finally {
+          image.dispose();
+        }
+      }
       try {
-        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        await File('$directory/$name.png')
-            .writeAsBytes(bytes!.buffer.asUint8List());
-      } finally {
-        image.dispose();
+        await writeImage().timeout(const Duration(seconds: 4));
+      } on TimeoutException {
+        captureUnavailable = true;
+        debugPrint('Optional native screenshot timed out: $name');
       }
     }
 
@@ -174,6 +220,32 @@ void main() {
           find.byType(TeamDetailsScreen, skipOffstage: false), findsOneWidget);
       expect(t.widget<TeamDetailsScreen>(team).team.id, cfg['team_project']);
       final teamRoute = ModalRoute.of(t.element(team));
+      final projectMessage = find.text('Расчёт моста: проект 036');
+      await wait(() => projectMessage.hitTestable().evaluate().isNotEmpty,
+          'The project message is visible');
+      await wait(
+          () => find.byType(EditableText).hitTestable().evaluate().isNotEmpty,
+          'Project composer is ready');
+      final messageRect = t.getRect(projectMessage);
+      await t.longPress(projectMessage.hitTestable());
+      await tap(find.text('Выбрать'));
+      expect(find.text('Выбрано 1'), findsOneWidget);
+      expect(find.byType(BottomSelectionBar), findsOneWidget);
+      final selectedRect = t.getRect(projectMessage);
+      expect(selectedRect.size, messageRect.size);
+      expect(selectedRect.center.dy, closeTo(messageRect.center.dy, 1));
+      await t.dragFrom(selectedRect.center, const Offset(-240, 0));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(find.text('Выбрано 1').hitTestable(), findsOneWidget);
+      expect(t.getRect(projectMessage).center.dy, closeTo(messageRect.center.dy, 1));
+      await capture('native-message-selection');
+      await tap(find.byTooltip('Назад'));
+      expect(find.byType(BottomSelectionBar), findsNothing);
+      expect(t.getRect(projectMessage).center.dy,
+          closeTo(messageRect.center.dy, 1));
+      print(
+          'PASS iPhone follow-up: long press > Выбрать preserves the project message through entry and exit');
+
       await tap(find.text('Файлы'));
       final panel = find.byType(FilesTab);
       await tap(find.descendant(of: panel, matching: find.text('Файлы')));
@@ -227,8 +299,12 @@ void main() {
       nav.push<void>(MaterialPageRoute(
           builder: (_) => const MyChatsScreen(enableRealtime: false)));
       final catalog = find.byType(MyChatsScreen);
-      Finder teamScreen(String key) => find.byWidgetPredicate((widget) =>
-          widget is TeamDetailsScreen && widget.team.id == cfg[key]);
+      Finder teamScreen(String key) => find.byElementPredicate((element) {
+            final widget = element.widget;
+            return widget is TeamDetailsScreen &&
+                widget.team.id == cfg[key] &&
+                ModalRoute.isCurrentOf(element) == true;
+          });
       final targetTeam = teamScreen('team_project');
       final sourceTeam = teamScreen('team_control');
       Finder editor(Finder screen) =>
@@ -238,19 +314,175 @@ void main() {
           of: targetTeam, matching: find.byType(ChatMessageList));
       final projectRow =
           find.byKey(ValueKey<String>(cfg['chat_project'] as String));
-      bool isCurrent(Finder screen) =>
-          screen.evaluate().isNotEmpty &&
-          ModalRoute.isCurrentOf(t.element(screen)) == true;
+      bool isCurrent(Finder screen) => screen.evaluate().isNotEmpty;
       Future<void> waitForProject() =>
           wait(() => isCurrent(targetTeam), 'Target project chat');
+
+      final slow = _HeldMembership(cfg['team_project'] as String);
+      transport.holdMembership = slow;
+      addTearDown(() {
+        if (!slow.release.isCompleted) slow.release.complete();
+      });
       await tap(projectRow);
       await waitForProject();
+      await wait(() => slow.received.isCompleted, 'Held rights response');
+      final connecting = find.text('Подключение к чату…');
+      expect(connecting, findsOneWidget);
+      expect(composer, findsNothing);
+      final shortMessage = find.text('Расчёт моста: проект 036').hitTestable();
+      await wait(
+          () => shortMessage.evaluate().isNotEmpty, 'Readable short history');
+      final initialMessageRect = t.getRect(shortMessage);
+      final waitingViewport = t.getRect(viewport);
+      await capture('native-chat-awaiting-write-rights');
+      slow.release.complete();
       await wait(() => composer.hitTestable().evaluate().isNotEmpty,
           'Composer from list');
       final listRect = t.getRect(composer);
+      expect(t.getRect(viewport).top, closeTo(waitingViewport.top, 1));
+      expect(t.getRect(viewport).bottom, closeTo(waitingViewport.bottom, 1));
+      expect(t.getRect(shortMessage).top, closeTo(initialMessageRect.top, 1));
+      const sentText = 'Сообщение в чате без доступа к заданиям';
+      await t.enterText(composer, sentText);
+      final sendButton = find.byTooltip('Отправить').hitTestable();
+      expect(sendButton, findsOneWidget);
+      await t.tap(sendButton);
+      await wait(() => find.text(sentText).hitTestable().evaluate().isNotEmpty,
+          'Sent from the confirmed composer');
+      await wait(() => t.widget<EditableText>(composer).controller.text.isEmpty,
+          'The accepted send clears the editor');
+      final sent = await sb
+          .from('messages')
+          .select('id,author_id')
+          .eq('chat_id', cfg['chat_project'] as String)
+          .eq('body', sentText);
+      expect(sent, hasLength(1));
+      expect(sent.single['author_id'], sb.auth.currentUser!.id);
+      print(
+          'PASS iPhone follow-up: slow rights and independent send preserve short history and reach the correct team');
+
+      final tabs =
+          find.descendant(of: targetTeam, matching: find.byType(TabBar));
+      final header =
+          find.descendant(of: targetTeam, matching: find.text('Сопромат'));
+      final headerTop = t.getTopLeft(header).dy;
+      final tabsTop = t.getTopLeft(tabs).dy;
+      await capture('native-chat-header-before-focus');
+      await t.tap(composer);
+      t.view.viewInsets = const FakeViewPadding(bottom: 280);
+      await t.pump(const Duration(milliseconds: 350));
+      expect(t.getTopLeft(header).dy, closeTo(headerTop, 1));
+      expect(t.getTopLeft(tabs).dy, closeTo(tabsTop, 1));
+      expect(t.getTopLeft(viewport).dy, closeTo(waitingViewport.top, 1));
+      expect(t.takeException(), isNull);
+      await capture('native-chat-header-with-keyboard-inset');
+      t.view.resetViewInsets();
+      await t.pump(const Duration(milliseconds: 250));
       await back();
       await wait(() => catalog.hitTestable().evaluate().isNotEmpty,
           'Return to chat list');
+
+      await sb.rpc('fixture_seed_long_history');
+      await tap(projectRow);
+      await waitForProject();
+      await wait(
+          () => find
+              .textContaining('История чата')
+              .hitTestable()
+              .evaluate()
+              .isNotEmpty,
+          'Long project history');
+      final historyScrollable = find
+          .descendant(of: viewport, matching: find.byType(Scrollable))
+          .first;
+      final scrolling = t.state<ScrollableState>(historyScrollable).position;
+      await t.drag(historyScrollable, const Offset(0, 240));
+      await t.pump(const Duration(milliseconds: 500));
+      expect(scrolling.pixels, greaterThan(150));
+      final olderPosition = scrolling.pixels;
+      final anchor = find.textContaining('История чата').hitTestable().first;
+      final anchorLabel = t.widget<Text>(anchor).data!;
+      final exactAnchor = find.text(anchorLabel).hitTestable();
+      final anchorTop = t.getTopLeft(exactAnchor).dy;
+      await t.tap(exactAnchor);
+      await t.pump(const Duration(milliseconds: 250));
+      expect(t.getTopLeft(tabs).dy, closeTo(tabsTop, 1));
+      expect(t.getTopLeft(exactAnchor).dy, closeTo(anchorTop, 1));
+      await tap(find.descendant(of: tabs, matching: find.text('Файлы')));
+      await wait(
+          () => find.byType(FilesTab).hitTestable().evaluate().isNotEmpty,
+          'Files tab');
+      expect(t.getTopLeft(tabs).dy, closeTo(tabsTop, 1));
+      await tap(find.descendant(of: tabs, matching: find.text('Чат')));
+      await wait(() => exactAnchor.evaluate().isNotEmpty,
+          'Return to previous history anchor');
+      expect(t.getTopLeft(exactAnchor).dy, closeTo(anchorTop, 1));
+      expect(scrolling.pixels, closeTo(olderPosition, 1));
+      await t.drag(historyScrollable, const Offset(0, -210));
+      await t.pump(const Duration(milliseconds: 500));
+      expect(scrolling.pixels, lessThan(olderPosition));
+      expect(t.getTopLeft(header).dy, closeTo(headerTop, 1));
+      await capture('native-chat-long-history-after-files');
+      print(
+          'PASS iPhone follow-up: header and history stable under focus, a message tap, both scroll directions and returning from files');
+      await back();
+      await wait(() => catalog.hitTestable().evaluate().isNotEmpty,
+          'Return from long chat');
+
+      final emptyTeam = teamScreen('team_empty');
+      final emptyEditor = editor(emptyTeam);
+      final emptyRow =
+          find.byKey(ValueKey<String>(cfg['chat_empty'] as String));
+      final emptyMessages = await sb
+          .from('messages')
+          .select('id')
+          .eq('chat_id', cfg['chat_empty'] as String);
+      expect(emptyMessages, isEmpty);
+      await tap(emptyRow);
+      await wait(
+          () =>
+              isCurrent(emptyTeam) &&
+              emptyEditor.hitTestable().evaluate().isNotEmpty,
+          'Empty team is independently writable');
+      await wait(() => find.text('Сообщений пока нет').evaluate().isNotEmpty,
+          'Confirmed empty history');
+      expect(find.text('Напишите первое сообщение.'), findsOneWidget);
+      final emptyTeamModel = t.widget<TeamDetailsScreen>(emptyTeam).team;
+      await back();
+      await wait(() => catalog.hitTestable().evaluate().isNotEmpty,
+          'Return from empty chat');
+      await sb.rpc('fixture_archive_empty_chat');
+      unawaited(nav.push<void>(MaterialPageRoute(
+          builder: (_) => TeamDetailsScreen(team: emptyTeamModel))));
+      await wait(
+          () =>
+              isCurrent(emptyTeam) &&
+              find
+                  .text('Только чтение. Отправка недоступна.')
+                  .evaluate()
+                  .isNotEmpty,
+          'Archive lookup excludes an otherwise eligible member');
+      expect(emptyEditor, findsNothing);
+      await back();
+      await wait(() => catalog.hitTestable().evaluate().isNotEmpty,
+          'Return from archived chat');
+      unawaited(nav.push<void>(MaterialPageRoute(
+          builder: (_) =>
+              TeamDetailsScreen(team: emptyTeamModel, readOnly: true))));
+      await wait(
+          () =>
+              isCurrent(emptyTeam) &&
+              find
+                  .text('Только чтение. Семестр завершён.')
+                  .evaluate()
+                  .isNotEmpty,
+          'Completed-semester route remains read-only');
+      expect(emptyEditor, findsNothing);
+      print(
+          'PASS iPhone follow-up: empty active and archived teams honor both exact send and semester route access');
+      await back();
+      await wait(() => catalog.hitTestable().evaluate().isNotEmpty,
+          'Return from completed semester');
 
       await tap(find.byKey(ValueKey<String>(cfg['chat_control'] as String)));
       await wait(
@@ -287,24 +519,37 @@ void main() {
       // History remains available throughout so the denial has a visible state.
       await back();
       await wait(() => isCurrent(sourceTeam), 'Return to source chat');
-      await sb.rpc('fixture_deny_project_writes');
       final targetMessage = await sb
           .from('messages')
           .select('id')
           .eq('chat_id', cfg['chat_project'] as String)
+          .eq('body', 'Расчёт моста: проект 036')
           .single();
       final sourceMessage = find.text('Обычный чат 036').hitTestable();
       await wait(
           () => sourceMessage.evaluate().isNotEmpty, 'Visible source message');
-      unawaited(openGroupActionDeeplink(
-        t.element(sourceMessage),
-        GroupActionDeeplinkArgs(
-          chatId: cfg['chat_project'] as String,
-          cardMessageId: targetMessage['id'] as String,
-          entityType: 'message',
-          entityId: '',
-        ),
-      ));
+      void openProjectDeeplink() => unawaited(openGroupActionDeeplink(
+          t.element(sourceMessage),
+          GroupActionDeeplinkArgs(
+            chatId: cfg['chat_project'] as String,
+            cardMessageId: targetMessage['id'] as String,
+            entityType: 'message',
+            entityId: '',
+          )));
+      final stale = _HeldMembership(cfg['team_project'] as String);
+      transport.holdMembership = stale;
+      addTearDown(() {
+        if (!stale.release.isCompleted) stale.release.complete();
+      });
+      openProjectDeeplink();
+      await waitForProject();
+      await wait(
+          () => stale.received.isCompleted, 'Captured old positive rights');
+      expect(composer, findsNothing);
+      await back();
+      await wait(() => isCurrent(sourceTeam), 'Leave pending route');
+      await sb.rpc('fixture_deny_project_writes');
+      openProjectDeeplink();
       await waitForProject();
       await wait(
           () => find
@@ -313,18 +558,22 @@ void main() {
               .isNotEmpty,
           'Accessible read-only state');
       expect(composer, findsNothing);
+      stale.release.complete();
+      await t.pump(const Duration(milliseconds: 500));
+      expect(composer, findsNothing);
+      expect(find.text('Только чтение. Отправка недоступна.'), findsOneWidget);
       await wait(
           () => find.text('Расчёт моста: проект 036').evaluate().isNotEmpty,
           'History remains available for reading');
       await capture('native-read-only-team');
       print(
-          'PASS iPhone follow-up: composer denied, existing short team history readable');
+          'PASS iPhone follow-up: composer denied after a stale positive response, existing team history readable');
     } finally {
       await t.pumpWidget(const SizedBox.shrink());
       await t.pump(const Duration(milliseconds: 350));
       await sb.auth.signOut(scope: SignOutScope.local);
       await Supabase.instance.dispose();
-      http.close();
+      transport.close();
       if (verifiedExport != null && await verifiedExport.exists()) {
         await verifiedExport.delete();
       }

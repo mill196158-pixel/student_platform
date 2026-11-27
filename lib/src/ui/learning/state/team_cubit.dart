@@ -25,6 +25,9 @@ import 'team_cache_owner.dart';
 import 'offline_assignment_store.dart';
 import 'verified_empty_team_chat.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/transport_failure.dart';
+import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_repository.dart'
+    show UnconfirmedMessageSend;
 
 /// Shares one follow-up page among requests that arrive while a read is active.
 /// Each caller completes with its own scheduled read, even during a busy chat.
@@ -599,7 +602,13 @@ class TeamCubit extends Cubit<TeamState> {
       _rememberTeamChat(sorted, allowEmpty: true);
       return sorted;
     }
-    final merged = ChatMessageMemoryCache.merge(chatId, messages);
+    // Legacy group sends are optimistic in this route only. A different route
+    // or a restarted process cannot know whether the server committed them.
+    final merged = ChatMessageMemoryCache.merge(
+      chatId,
+      messages.where((message) =>
+          !message.isSending || !message.requiresExplicitAcknowledgement),
+    );
     _rememberTeamChat(merged, allowEmpty: true);
     unawaited(ChatMessageCacheStore.merge(
       chatId: chatId,
@@ -704,7 +713,9 @@ class TeamCubit extends Cubit<TeamState> {
       chatId, serverMessage, clientId: clientId,
     );
     return _dedupeAndSort([
-      ...state.chat.where((message) => !message.isLocal),
+      ...state.chat.where((message) => !message.isLocal ||
+          (message.isSending && message.requiresExplicitAcknowledgement &&
+              message.clientId != clientId)),
       ...cached,
       serverMessage.copyWith(deliveryStatus: MessageDeliveryStatus.sent),
     ]);
@@ -737,7 +748,7 @@ class TeamCubit extends Cubit<TeamState> {
   }
 
   bool _isLikelySameLocalMessage(Message local, Message server) {
-    if (!local.isLocal || server.isLocal) return false;
+    if (!local.isLocal || local.requiresExplicitAcknowledgement || server.isLocal) return false;
     if (local.authorId.isNotEmpty &&
         server.authorId.isNotEmpty &&
         local.authorId != server.authorId) {
@@ -750,11 +761,14 @@ class TeamCubit extends Cubit<TeamState> {
     return local.at.difference(server.at).abs() <= const Duration(seconds: 30);
   }
 
-  void _markLocalMessageFailed(String clientId) {
+  void _markLocalMessage(
+    String clientId,
+    MessageDeliveryStatus status,
+  ) {
     if (_closing || isClosed) return;
     final updated = state.chat.map((message) {
       if (message.clientId == clientId || message.id == clientId) {
-        return message.copyWith(deliveryStatus: MessageDeliveryStatus.failed);
+        return message.copyWith(deliveryStatus: status);
       }
       return message;
     }).toList();
@@ -915,6 +929,7 @@ class TeamCubit extends Cubit<TeamState> {
     final currentUid = sessionOwner.$1;
     final scope = _authScope;
     final owner = scope?.capture();
+    final scopeGeneration = scope?.generation;
     final binding = ChatFileAccess.currentSessionBinding;
     final generation = ChatFileAccess.generation;
     bool sameOwner() => _currentProfileOwner() == sessionOwner &&
@@ -922,15 +937,19 @@ class TeamCubit extends Cubit<TeamState> {
     bool sameSession() => scope?.logoutFenced != true &&
         ChatFileAccess.userId == currentUid && generation == ChatFileAccess.generation &&
         (binding == null ? sameOwner() : ChatFileAccess.currentSessionBinding == binding);
+    bool ownsSend() => sameSession() &&
+        (scope == null || (owner != null && scope.generation == scopeGeneration));
+    bool canSettleSend() => !_closing && !isClosed && ownsSend();
     bool canUpdate() => !_closing && !isClosed && sameOwner();
     if (!canUpdate()) return null;
 
     // оптимистично
-    final clientId =
-        'local_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(999)}';
+    final clientId = '${Message.teamSendClientIdPrefix}'
+        '${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(999)}';
+    final targetChatId = _mainChatId;
     final local = Message(
       id: clientId,
-      chatId: _mainChatId ?? '',
+      chatId: targetChatId ?? '',
       authorId: currentUid,
       authorLogin: '',
       authorName: authorName ?? await _getMyDisplayName(),
@@ -953,16 +972,59 @@ class TeamCubit extends Cubit<TeamState> {
     try {
       messageId = await repo.saveChat(state.team.id, [local]);
     } catch (e) {
-      if (canUpdate()) _markLocalMessageFailed(clientId);
+      if (!ownsSend()) return null;
+      final code = e is PostgrestException ? e.code : null;
+      final status = int.tryParse(code ?? '');
+      final unconfirmed = e is UnconfirmedMessageSend ||
+          isTemporaryTransportFailure(e) ||
+          (status != null &&
+              ((status >= 200 && status < 300) || status == 408 ||
+                  (status >= 500 && status < 600)));
+      if (unconfirmed) {
+        if (!canSettleSend()) {
+          if (targetChatId != null) {
+            await ChatMessageCacheStore.upsert(
+              targetChatId,
+              local.copyWith(deliveryStatus: MessageDeliveryStatus.unconfirmed),
+              userId: currentUid,
+            );
+          }
+          return null;
+        }
+        _markLocalMessage(clientId, MessageDeliveryStatus.unconfirmed);
+        final chatId = _mainChatId;
+        if (chatId != null) {
+          unawaited(_refreshUnconfirmedSend(chatId,
+              isCurrent: () => canSettleSend() && _mainChatId == chatId));
+        }
+        throw const UnconfirmedMessageSend();
+      }
+      if (canSettleSend()) _markLocalMessage(clientId, MessageDeliveryStatus.failed);
       safeDebugLog('[TeamCubit] sendMessage failed: ${e.runtimeType}');
       return null;
     }
-    if (!sameSession()) return null;
+    if (!ownsSend()) return null;
     if (messageId == null || messageId.isEmpty) {
-      if (canUpdate()) _markLocalMessageFailed(clientId);
+      if (canSettleSend()) _markLocalMessage(clientId, MessageDeliveryStatus.failed);
       return null;
     }
-    if (!canUpdate()) return messageId;
+    if (!canSettleSend()) {
+      if (targetChatId != null) {
+        final cached = ChatMessageCacheStore.peek(targetChatId, userId: currentUid);
+        final server = cached.messages.where((row) => row.id == messageId).firstOrNull;
+        await ChatMessageCacheStore.reconcileUpsert(
+          targetChatId,
+          server ?? local.copyWith(
+            id: messageId,
+            deliveryStatus: MessageDeliveryStatus.sent,
+            clearClientId: true,
+          ),
+          clientId: clientId,
+          userId: currentUid,
+        );
+      }
+      return messageId;
+    }
 
     // Reconcile the exact acknowledged ID before the durable history refresh.
     // Keep the original bubble sending until that refresh settles.
@@ -989,7 +1051,7 @@ class TeamCubit extends Cubit<TeamState> {
     } finally {
       removedWhileConfirming = _acknowledgingSends.remove(messageId) == null;
     }
-    if (!canUpdate()) return sameSession() ? messageId : null;
+    if (!canSettleSend()) return sameSession() ? messageId : null;
     if (removedWhileConfirming) return messageId;
     final refreshed = chatId == null
         ? state.chat
@@ -1002,7 +1064,7 @@ class TeamCubit extends Cubit<TeamState> {
       final serverMessage =
           await repo.loadMessageById(state.team.id, messageId);
       if (!sameSession()) return null;
-      if (!canUpdate()) return messageId;
+      if (!canSettleSend()) return messageId;
       if (serverMessage != null && state.chat.any((row) => row.id == messageId)) {
         emit(state.copyWith(
           chat: _reconcileCachedMessage(serverMessage, clientId: clientId),
@@ -1015,8 +1077,26 @@ class TeamCubit extends Cubit<TeamState> {
     return sameSession() ? messageId : null;
   }
 
+  Future<void> _refreshUnconfirmedSend(
+    String chatId, {
+    required bool Function() isCurrent,
+  }) async {
+    final repository = repo;
+    if (repository is! SupabaseLearningRepository || !isCurrent()) return;
+    try {
+      final page = await repository.loadConfirmedChatPage(chatId);
+      if (!isCurrent() || page.source != TeamPageSource.serverRpc) return;
+      emit(state.copyWith(chat: _mergeCachedChat([...state.chat, ...page.messages])));
+    } catch (_) {
+      // Keep the local message and its delivery state until history is available.
+    }
+  }
+
   Future<void> retryFailedTextMessage(Message message) async {
-    if (!message.isFailed) return;
+    if (!message.isFailed ||
+        !state.chat.any((entry) => entry.id == message.id && entry.isFailed)) {
+      return;
+    }
     final text = message.text.trim();
     final fileId = message.fileId;
     if (text.isEmpty && (fileId == null || fileId.isEmpty)) return;
@@ -1024,13 +1104,17 @@ class TeamCubit extends Cubit<TeamState> {
     // Drop the stale local bubble before retrying so a successful retry cannot
     // leave both the failed local row and the server row in the list.
     emit(state.copyWith(chat: _removeCachedMessage(message.id)));
-    await sendMessage(
-      'me',
-      text,
-      replyToId: message.replyToId,
-      type: message.type,
-      fileId: fileId,
-    );
+    try {
+      await sendMessage(
+        'me',
+        text,
+        replyToId: message.replyToId,
+        type: message.type,
+        fileId: fileId,
+      );
+    } on UnconfirmedMessageSend {
+      // The replacement bubble keeps the text and shows the unknown status.
+    }
   }
 
   Future<void> removeMessage(String id) async {
@@ -1041,6 +1125,7 @@ class TeamCubit extends Cubit<TeamState> {
     // Оптимистично удаляем локально
     final updated = _removeCachedMessage(id);
     emit(state.copyWith(chat: updated));
+    if (previous[idx].isUnconfirmed) return;
 
     // Удаляем с сервера
     final success = await repo.deleteMessage(id);

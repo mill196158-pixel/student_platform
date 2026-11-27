@@ -121,6 +121,9 @@ void main() {
     List<dynamic>? sentFileIds;
     const uid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const chat = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const teamId = '11111111-1111-4111-8111-111111111111';
+    const otherUid = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const seedTeamId = 'seed-team';
     await tester.runAsync(() async {
       await Supabase.initialize(
           url: SupabaseConfig.url,
@@ -139,9 +142,20 @@ void main() {
                   request: request,
                   headers: {'content-type': 'application/json'});
             }
-            final body =
-                request.url.path.endsWith('/chats') ? '{"id":"$chat"}' : '[]';
-            return http.Response(body, 200,
+            final team = request.url.queryParameters['team_id']?.substring(3);
+            final member = request.url.queryParameters['user_id']?.substring(3);
+            final Object body = switch (request.url.path) {
+              '/rest/v1/chats' => {'id': chat},
+              '/rest/v1/team_members' when
+                  (team == teamId && member == uid) ||
+                  (team == seedTeamId && member == otherUid) =>
+                [{'team_id': team, 'user_id': member}],
+              '/rest/v1/rpc/get_my_chat_summaries' => [
+                  {'chat_id': chat, 'team_id': team, 'chat_type': 'team_main'},
+                ],
+              _ => const [],
+            };
+            return http.Response(jsonEncode(body), 200,
                 request: request,
                 headers: {'content-type': 'application/json'});
           }),
@@ -187,7 +201,7 @@ void main() {
           permitted: () => true);
     });
     const team = Team(
-        id: '11111111-1111-4111-8111-111111111111',
+        id: teamId,
         name: 'Команда',
         teacher: '',
         groupCode: '',
@@ -305,6 +319,15 @@ void main() {
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump(const Duration(milliseconds: 400));
     final hydrationStore = AccountDraftStore();
+    Future<void> waitForComposer() async {
+      final editor = find.byType(TextField).hitTestable();
+      for (var i = 0; i < 20 && editor.evaluate().isEmpty; i++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(editor, findsOneWidget);
+    }
     await tester.enterText(find.byType(TextField).last, 'Старый scoped');
     await tester.pump(const Duration(milliseconds: 400));
     final hydrationEntered = Completer<void>();
@@ -323,6 +346,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(hydrationEntered.isCompleted, isTrue);
+    await waitForComposer();
     expect(find.byType(TextField), findsWidgets,
         reason: 'composer remains visible while scoped draft loads');
     await tester.enterText(find.byType(TextField).last, 'Новый ранний ввод');
@@ -390,6 +414,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 30));
     }
     expect(delayedReadEntered.isCompleted, isTrue);
+    await waitForComposer();
     for (var edit = 0; edit < 30; edit++) {
       await tester.enterText(find.byType(TextField).last, 'Ввод перед закрытием $edit');
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
@@ -737,7 +762,6 @@ void main() {
     final oldSessionJson = client.auth.currentSession!.toJson();
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     String encoded(Object value) => base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
-    const otherUid = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
     final otherToken = '${encoded({'alg': 'none'})}.${encoded({
       'iss': '${SupabaseConfig.url}/auth/v1', 'sub': otherUid,
       'session_id': 'ffffffff-ffff-4fff-8fff-ffffffffffff',
@@ -778,7 +802,7 @@ void main() {
     final seedEvents = StreamController<AuthState>.broadcast(sync: true);
     final delayedScope = AuthSessionScope(currentSession: () => client.auth.currentSession,
         authEvents: seedEvents.stream);
-    const seedTeam = Team(id: 'seed-team', name: 'Seed', teacher: '', groupCode: '', icon: 'S');
+    const seedTeam = Team(id: seedTeamId, name: 'Seed', teacher: '', groupCode: '', icon: 'S');
     final seedCubit = TeamCubit(seedTeam, repository: _Repo());
     seedCubit.emit(const TeamState(team: seedTeam, chatHasSnapshot: true));
     await tester.pumpWidget(AuthSessionScopeHost(createScope: () => delayedScope,

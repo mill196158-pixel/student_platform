@@ -248,6 +248,12 @@ void main() {
     expect(calls, 0);
     ProjectChatServerCache.instanceChanges.removeListener(listener);
   });
+  Future<void> expandDetails(WidgetTester tester) async {
+    await tester.scrollUntilVisible(find.text('Дополнительно'), 260);
+    await tester.tap(find.text('Дополнительно'));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('shown owner value disappears when cache instance changes',
       (tester) async {
     final snapshot = InventorySnapshot(
@@ -257,12 +263,16 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
             measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot, debugCapabilities: caps)));
+            measure: () async => snapshot,
+            debugCapabilities: caps)));
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     await tester.pump();
-    expect(find.text('Логический размер подтверждённой части истории: ${utf8.encode(expectedPayload).length} Б'),
+    await expandDetails(tester);
+    expect(
+        find.text(
+            'Логический размер подтверждённой части истории: ${utf8.encode(expectedPayload).length} Б'),
         findsOneWidget);
     ProjectChatServerCache.qaInstance = ProjectChatServerCache(
         db: db,
@@ -294,6 +304,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     await tester.pump();
+    await expandDetails(tester);
     expect(
         find.text('Логический размер подтверждённой части истории: неизвестно'),
         findsOneWidget);
@@ -307,12 +318,16 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
             measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot, debugCapabilities: caps)));
+            measure: () async => snapshot,
+            debugCapabilities: caps)));
     await tester.runAsync(() async {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     await tester.pump();
-    expect(find.text('Логический размер подтверждённой части истории: ${utf8.encode(expectedPayload).length} Б'),
+    await expandDetails(tester);
+    expect(
+        find.text(
+            'Логический размер подтверждённой части истории: ${utf8.encode(expectedPayload).length} Б'),
         findsOneWidget);
     caps.block();
     await tester.pump();
@@ -331,7 +346,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
             measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot, debugCapabilities: caps)));
+            measure: () async => snapshot,
+            debugCapabilities: caps)));
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     gate.complete();
     await tester.runAsync(() async {

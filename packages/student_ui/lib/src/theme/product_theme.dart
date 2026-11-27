@@ -71,7 +71,7 @@ abstract final class ProductTheme {
               fontSize: 12, height: 1.45, color: scheme.onSurfaceVariant),
         );
     final type =
-        rawType.apply(fontFamily: base.textTheme.bodyMedium!.fontFamily);
+        rawType.apply(fontFamily: 'WorkspaceSans', package: 'student_ui');
     final shape =
         RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
     final outline = OutlineInputBorder(

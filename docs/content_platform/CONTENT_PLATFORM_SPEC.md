@@ -409,6 +409,12 @@ The reader opens the selected publication UUID and lets the student swipe
 through the rest of the authorized feed. The home screen refreshes the feed
 through `get_my_published_news()`.
 
+The reader shows publication text immediately. It revalidates each cover
+against the local media cache and can fetch a missing cover during a verified
+online session. Going offline or changing accounts cancels the session check
+for pending covers. Without a usable cover, the reader shows the publication
+title and text using the same card design.
+
 **Transactional `admin_set_news_audience`** (`content.write`, draft-only, locks row + `expected_version`):
 
 - `all` → clear junctions; `audience_type='all'`; `audience_group_id=null`
@@ -871,6 +877,11 @@ Validation: test/home_promo_loading_test.dart exercises cached hydration while d
 Home no longer waits for an aggregate dashboard before painting. Profile, schedule, group deadlines, news and assignment/team requests start independently; cached profile is accepted only for the current non-null auth UID. Up to four assignment requests run concurrently. Each completed section updates a single accumulated snapshot; previously rendered data remains during refresh. Pending/error labels distinguish unknown data from confirmed empty schedule/tasks. News metadata is emitted before images finish.
 
 Home refreshes coalesce within an account only, with an 18-second attempt deadline and generation invalidation. A stuck attempt releases retry; news/profile/promo reads have 12-second limits, schedule/assignment/deadline work 15 seconds. These are upper bounds on stalled work, not normal display delays. Late callbacks from old attempts/accounts cannot replace current content. Optional strict repository reads keep the Home error state instead of treating a failed fetch as empty.
+
+After a verified offline admission, the saved Home header can paint before
+schedule, assignments, and news have finished reading their snapshots. In an
+online session the Home cache reads also complete independently, and a late
+cache section cannot replace a newer live section.
 
 Profile paints its validated local header before session refresh finishes; authentication and password policy remain in the outer auth flow. Two profile cards hydrate concurrently; each card starts image and icon requests together and paints each asset independently. Profile opts into the existing account/asset/version-scoped persistent media cache with unchanged grant expiry checks. No database permissions or server schema changes are part of this performance fix.
 

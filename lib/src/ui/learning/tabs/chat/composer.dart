@@ -1,5 +1,6 @@
 // FILE: lib/src/ui/learning/tabs/chat/composer.dart
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/local_attach.dart';
@@ -41,6 +42,19 @@ class AttachedFile {
 }
 
 class Composer extends StatefulWidget {
+  static const _inputButtonHeight = 48.0;
+  static const _bodyPadding = EdgeInsets.fromLTRB(12, 10, 12, 6);
+
+  static double bottomPaddingOf(BuildContext context) {
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+    if (safeBottom <= 0) return 6;
+    return math.min(safeBottom, math.max(18.0, safeBottom - 12));
+  }
+
+  // One input row, its two border edges and the frame's top border.
+  static double restingHeightOf(BuildContext context) =>
+      _inputButtonHeight + 3 + _bodyPadding.vertical + bottomPaddingOf(context);
+
   final TextEditingController controller;
   final String? pickedImagePath;
   final Widget? leftButton;
@@ -99,9 +113,7 @@ class _ComposerState extends State<Composer> {
         .toList(growable: false);
 
     // Same bottom level as ModernBottomNav; keep home-indicator gesture clear.
-    final safeBottom = MediaQuery.paddingOf(context).bottom;
-    final bottomPad =
-        safeBottom > 0 ? (safeBottom - 12).clamp(18.0, safeBottom) : 6.0;
+    final bottomPad = Composer.bottomPaddingOf(context);
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomPad),
@@ -114,7 +126,7 @@ class _ComposerState extends State<Composer> {
             ),
           ),
         ),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+        padding: Composer._bodyPadding,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -313,14 +325,18 @@ class _ComposerState extends State<Composer> {
                             if (widget.onAttachFile != null)
                               IconButton(
                                 icon: const Icon(Icons.attach_file_rounded),
-                                constraints: const BoxConstraints(minWidth: 40, minHeight: 48),
+                                constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: Composer._inputButtonHeight),
                                 padding: EdgeInsets.zero,
                                 onPressed: widget.onAttachFile,
                                 tooltip: 'Прикрепить файл',
                               ),
                             IconButton(
                               icon: const Icon(Icons.image_outlined),
-                              constraints: const BoxConstraints(minWidth: 40, minHeight: 48),
+                              constraints: const BoxConstraints(
+                                  minWidth: 40,
+                                  minHeight: Composer._inputButtonHeight),
                               padding: EdgeInsets.zero,
                               onPressed: widget.onPickImage,
                               tooltip: 'Прикрепить изображение',

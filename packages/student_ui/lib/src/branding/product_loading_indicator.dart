@@ -15,7 +15,7 @@ class ProductLoadingIndicator extends StatelessWidget {
     super.key,
     this.color,
     this.semanticsLabel = 'Загрузка',
-  }) : size = 120, _inline = false;
+  }) : size = 138, _inline = false;
 
   /// A compact progress ring for controls and cards that may load together.
   const ProductLoadingIndicator.inline({

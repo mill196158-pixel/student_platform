@@ -98,6 +98,38 @@ class _OnlineDashboard extends _Dashboard {
   }
 }
 
+class _DelayedStoryDashboard extends _OnlineDashboard {
+  final cover = Completer<Uint8List?>();
+  int guardedReads = 0;
+
+  @override
+  HomeDashboardData get data => HomeDashboardData(
+      profile: const HomeUserProfile(name: 'QA'),
+      scheduleDate: DateTime.now(),
+      todayLessons: const [],
+      assignments: const [],
+      news: [
+        mapPublishedNews({
+          'id': 'with-cover',
+          'title': 'Cover on slow connection',
+          'body': 'Story body stays visible',
+          'created_at': '2026-11-27T00:00:00Z',
+          'variant': 'imageOverlay',
+          'image_path': 'news/cover.png',
+        }),
+      ]);
+
+  @override
+  Future<Uint8List?> resolveGuardedStoryImage(
+      HomeNewsItem item, OnlineSideEffectBarrier barrier,
+      {required bool Function() current}) async {
+    expect(current(), isTrue);
+    expect(item.id, 'with-cover');
+    guardedReads++;
+    return cover.future;
+  }
+}
+
 class _RefreshDashboard extends _Dashboard {
   _RefreshDashboard(this.first);
   final HomeNewsItem first;
@@ -186,6 +218,33 @@ class _DisposeActionState extends State<_DisposeAction> {
 }
 
 void main() {
+  testWidgets('news cover arrives in the already open protected reader',
+      (tester) async {
+    final dashboard = _DelayedStoryDashboard()..markGate.complete();
+    final barrier = OnlineSideEffectBarrier(ownerIsCurrent: () => true);
+    final bytes = Uint8List.fromList(base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP8zwACTGCSAQANHQEDgslx/wAAAABJRU5ErkJggg=='));
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(
+        dashboardService: dashboard, promoService: _Promo(),
+        notificationsApi: _Notifications(), onlineBarrier: barrier)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cover on slow connection'));
+    await tester.pumpAndSettle();
+    expect(find.text('Story body stays visible'), findsOneWidget);
+    expect(dashboard.guardedReads, 1);
+    final reader = find.byType(StudentNewsStorySheet);
+    expect(reader, findsOneWidget);
+    final image = find.descendant(of: reader, matching:
+        find.byWidgetPredicate((widget) =>
+            widget is Image && widget.image is MemoryImage));
+    expect(image, findsNothing);
+    dashboard.cover.complete(bytes);
+    await tester.pumpAndSettle();
+    expect(image, findsWidgets);
+    expect(find.text('Story body stays visible'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('refresh keeps validated current news frame and drops it on denial', (tester) async {
     final bytes = Uint8List.fromList(base64Decode(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII='));

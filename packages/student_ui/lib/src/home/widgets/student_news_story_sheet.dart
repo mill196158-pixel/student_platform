@@ -68,10 +68,10 @@ class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
   }
 
   Future<void> _precacheAround(int index) async {
-    await _ensureImage(index);
-    if (index + 1 < _news.length) {
-      await _ensureImage(index + 1);
-    }
+    await Future.wait([
+      _ensureImage(index),
+      _ensureImage(index + 1),
+    ]);
   }
 
   Future<void> _ensureImage(int index) async {
@@ -80,8 +80,16 @@ class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
     if (!item.usesImage) return;
     Uint8List? bytes = item.imageBytes;
     if ((bytes == null || bytes.isEmpty) && widget.resolveImage != null) {
-      bytes = await widget.resolveImage!(item);
-      if (!mounted || bytes == null || bytes.isEmpty) return;
+      try {
+        bytes = await widget.resolveImage!(item);
+      } catch (_) {
+        return;
+      }
+      if (!mounted ||
+          index >= _news.length ||
+          !identical(_news[index], item) ||
+          bytes == null ||
+          bytes.isEmpty) return;
       setState(() {
         _news[index] = item.copyWith(imageBytes: bytes);
       });
@@ -182,7 +190,8 @@ class _NewsStoryPage extends StatelessWidget {
         children: [
           _StoryHero(item: item),
           const SizedBox(height: 22),
-          if (item.variant == StudentHomeNewsVariant.imageOnly) ...[
+          if (item.variant == StudentHomeNewsVariant.imageOnly &&
+              item.hasImage) ...[
             Text(
               item.title,
               style: theme.textTheme.headlineSmall?.copyWith(
@@ -253,7 +262,6 @@ class _StoryHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final colors = item.gradientColors.length >= 2
         ? item.gradientColors
         : const [Color(0xFFEDE7F6), Color(0xFFD9CCF5)];
@@ -262,7 +270,7 @@ class _StoryHero extends StatelessWidget {
             ? Colors.white
             : const Color(0xFF111827);
 
-    final usesPhoto = item.usesImage;
+    final usesPhoto = item.usesImage && item.hasImage;
     final showOverlay =
         usesPhoto && item.variant == StudentHomeNewsVariant.imageOverlay;
 
@@ -273,19 +281,18 @@ class _StoryHero extends StatelessWidget {
     // ClipRRect on the outer container only — no inner padding/stripes.
     return ClipRRect(
       borderRadius: BorderRadius.circular(32),
-      child: SizedBox(
-        height: 280,
-        width: double.infinity,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 280),
         child: Stack(
-          fit: StackFit.expand,
           children: [
+            const SizedBox(width: double.infinity, height: 280),
             if (usesPhoto)
               Positioned.fill(
                 child: NewsImageFrame(
                   bytes: item.imageBytes,
                   colors: colors,
                   alignment: item.imageFocus,
-                  isLoading: !item.hasImage,
+                  isLoading: false,
                   fit: BoxFit.cover,
                 ),
               )
@@ -320,74 +327,80 @@ class _StoryHero extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 58,
-                      height: 58,
-                      decoration: BoxDecoration(
-                        color: onGradient.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Icon(item.icon, color: onGradient, size: 30),
-                    ),
-                    const Spacer(),
-                    Text(
-                      item.title,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        color: onGradient,
-                        fontWeight: FontWeight.w900,
-                        height: 1.05,
-                      ),
-                    ),
-                    if (item.subtitle.trim().isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        item.subtitle,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: onGradient.withValues(alpha: 0.84),
-                          fontWeight: FontWeight.w700,
-                          height: 1.25,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 232),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 58,
+                        height: 58,
+                        decoration: BoxDecoration(
+                          color: onGradient.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(20),
                         ),
+                        child: Icon(item.icon, color: onGradient, size: 30),
                       ),
+                      const SizedBox(height: 12),
+                      _StoryCaption(item: item, color: onGradient),
                     ],
-                  ],
+                  ),
                 ),
               ),
             ],
             if (showOverlay)
               Padding(
                 padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Spacer(),
-                    Text(
-                      item.title,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        height: 1.05,
-                      ),
-                    ),
-                    if (item.subtitle.trim().isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        item.subtitle,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.84),
-                          fontWeight: FontWeight.w700,
-                          height: 1.25,
-                        ),
-                      ),
-                    ],
-                  ],
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 232),
+                  child: Align(
+                    alignment: Alignment.bottomLeft,
+                    heightFactor: 1,
+                    child: _StoryCaption(item: item, color: Colors.white),
+                  ),
                 ),
               ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _StoryCaption extends StatelessWidget {
+  const _StoryCaption({required this.item, required this.color});
+
+  final StudentHomeNews item;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          item.title,
+          style: textTheme.headlineSmall?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w900,
+            height: 1.05,
+          ),
+        ),
+        if (item.subtitle.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            item.subtitle,
+            style: textTheme.bodyMedium?.copyWith(
+              color: color.withValues(alpha: 0.84),
+              fontWeight: FontWeight.w700,
+              height: 1.25,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

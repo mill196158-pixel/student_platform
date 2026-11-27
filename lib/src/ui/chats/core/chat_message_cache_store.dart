@@ -631,7 +631,7 @@ class ChatMessageCacheStore {
   }
 
   static bool _isLikelySameLocalMessage(Message local, Message server) {
-    if (!local.isLocal || server.isLocal) return false;
+    if (!local.isLocal || local.requiresExplicitAcknowledgement || server.isLocal) return false;
     // A failed text send may be a different message with identical content.
     // Only an acknowledgement carrying its client id may remove it.
     if (local.isFailed &&

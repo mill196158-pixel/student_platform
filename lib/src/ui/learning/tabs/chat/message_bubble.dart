@@ -395,10 +395,11 @@ class MessageBubble extends StatelessWidget {
                                 .toList(),
                           ),
                         ],
-                        if (message.isFailed) ...[
+                        if (message.isFailed || message.isUnconfirmed) ...[
                           const SizedBox(height: 6),
                           _DeliveryStateRow(
                             onRetry: onRetryFailed,
+                            unconfirmed: message.isUnconfirmed,
                           ),
                         ],
                       ],
@@ -522,9 +523,11 @@ class _TextMessageContent extends StatelessWidget {
 
 class _DeliveryStateRow extends StatelessWidget {
   final VoidCallback? onRetry;
+  final bool unconfirmed;
 
   const _DeliveryStateRow({
     this.onRetry,
+    this.unconfirmed = false,
   });
 
   @override
@@ -540,14 +543,14 @@ class _DeliveryStateRow extends StatelessWidget {
         children: [
           Icon(Icons.error_outline_rounded, size: 14, color: color),
           Text(
-            'Не отправлено',
+            unconfirmed ? 'Доставка не подтверждена' : 'Не отправлено',
             style: TextStyle(
               color: color,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
           ),
-          if (onRetry != null)
+          if (onRetry != null && !unconfirmed)
             InkWell(
               borderRadius: BorderRadius.circular(10),
               onTap: onRetry,

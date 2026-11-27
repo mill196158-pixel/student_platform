@@ -16,6 +16,8 @@ import 'package:student_platform/src/ui/home/home_snapshot_codec.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/data/chat_group_actions_repository.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/chat_group_actions.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
+import 'package:student_platform/src/ui/home/news_cover_http_client.dart'
+    if (dart.library.io) 'package:student_platform/src/ui/home/news_cover_http_client_io.dart';
 import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 import 'package:student_platform/src/ui/home/news_sqlite_image_store.dart';
 import 'package:student_platform/src/ui/learning/data/supabase_learning_repository.dart';
@@ -193,69 +195,12 @@ class HomeDashboardService {
     var assignments = validPrevious?.assignments ?? <HomeAssignmentPreview>[];
     var reads = validPrevious?.readNotificationIds ?? <String>{};
     var news = validPrevious?.news ?? <HomeNewsItem>[];
-    if (news.isNotEmpty) {
-      try {
-        news = await _hydrateImagesFromDisk(news).timeout(const Duration(seconds: 1));
-      } catch (_) {
-        news = news.map((item) => item.copyWith(clearImageBytes: true)).toList();
-      }
-      if (!current()) throw HomeLoadCancelled();
-    }
     var actions = validPrevious?.groupActions ?? <HomeGroupActionPreview>[];
     String? scheduleStatus = 'Загружаем расписание…';
     String? assignmentsStatus = 'Загружаем ближайшие дела…';
     var scheduleFromCache = false;
     var assignmentsFromCache = false;
     var profileFromCache = false;
-    if (validPrevious == null &&
-        cache != null &&
-        cacheScope != null &&
-        userId != null) {
-      Future<HomeSectionSnapshot?> safeRead(HomeSnapshotSection section) async {
-        try {
-          return await cache
-              .read(userId, section)
-              .timeout(const Duration(seconds: 1), onTimeout: () => null);
-        } catch (_) {
-          return null;
-        }
-      }
-
-      final cached = await Future.wait([
-        safeRead(HomeSnapshotSection.schedule),
-        safeRead(HomeSnapshotSection.assignments),
-        safeRead(HomeSnapshotSection.profile),
-      ]);
-      if (!current() || !cache.isCurrent(cacheScope)) throw HomeLoadCancelled();
-      final schedule = cached[0];
-      if (schedule != null && schedule.date == MskDate.isoDate(scheduleDate)) {
-        final decoded =
-            schedule.items.map(HomeSnapshotCodec.lessonFromMap).toList();
-        if (decoded.every((item) => item != null)) {
-          lessons = decoded.cast<Lesson>();
-          scheduleStatus = 'Сохранённое расписание';
-          scheduleFromCache = true;
-        }
-      }
-      final savedAssignments = cached[1];
-      if (savedAssignments != null) {
-        final decoded = savedAssignments.items
-            .map(HomeSnapshotCodec.assignmentFromMap)
-            .toList();
-        if (decoded.every((item) => item != null)) {
-          assignments = decoded.cast<HomeAssignmentPreview>();
-          assignmentsStatus = 'Сохранённые задания';
-          assignmentsFromCache = true;
-        }
-      }
-      final savedProfile = cached[2];
-      if (savedProfile != null &&
-          savedProfile.items.length == 1 &&
-          savedProfile.items.first['id'] == userId) {
-        profile = HomeUserProfile.fromMap(savedProfile.items.first);
-        profileFromCache = true;
-      }
-    }
     var assignmentsReady = false;
     var actionsReady = false;
     void updateAssignmentStatus() {
@@ -276,10 +221,55 @@ class HomeDashboardService {
       if (current()) onUpdate?.call(snapshot());
     }
 
-    // Paint the available cache without waiting for unrelated network calls.
-    // The later profile/news callbacks will fill their existing sections.
-    if (scheduleFromCache || assignmentsFromCache || profileFromCache)
-      publish();
+    var profileConfirmed = false;
+    var scheduleConfirmed = false;
+    // Cache readers and server requests run independently. A slow schedule
+    // store cannot hold the signed-in header, and a late read cannot replace
+    // a section that already arrived from the server.
+    final cacheReads = <Future<void>>[];
+    if (validPrevious == null &&
+        cache != null && cacheScope != null && userId != null) {
+      Future<void> restore(HomeSnapshotSection section,
+          void Function(HomeSectionSnapshot) apply) async {
+        try {
+          final saved = await cache.read(userId, section)
+              .timeout(const Duration(seconds: 1), onTimeout: () => null);
+          if (saved == null || !current() || !cache.isCurrent(cacheScope)) return;
+          apply(saved);
+        } catch (_) {
+          // A cache failure affects only its own section.
+        }
+      }
+
+      cacheReads.addAll([
+        restore(HomeSnapshotSection.schedule, (saved) {
+          if (scheduleConfirmed || saved.date != MskDate.isoDate(scheduleDate)) return;
+          final decoded = saved.items.map(HomeSnapshotCodec.lessonFromMap).toList();
+          if (decoded.any((item) => item == null)) return;
+          lessons = decoded.cast<Lesson>();
+          scheduleStatus = 'Сохранённое расписание';
+          scheduleFromCache = true;
+          publish();
+        }),
+        restore(HomeSnapshotSection.assignments, (saved) {
+          if (assignmentsReady) return;
+          final decoded =
+              saved.items.map(HomeSnapshotCodec.assignmentFromMap).toList();
+          if (decoded.any((item) => item == null)) return;
+          assignments = decoded.cast<HomeAssignmentPreview>();
+          assignmentsStatus = 'Сохранённые задания';
+          assignmentsFromCache = true;
+          publish();
+        }),
+        restore(HomeSnapshotSection.profile, (saved) {
+          if (profileConfirmed || saved.items.length != 1 ||
+              saved.items.first['id'] != userId) return;
+          profile = HomeUserProfile.fromMap(saved.items.first);
+          profileFromCache = true;
+          publish();
+        }),
+      ]);
+    }
 
     // Independent work starts before the remote profile. Media never gates
     // schedule or assignments; each completed section is painted immediately.
@@ -287,6 +277,8 @@ class HomeDashboardService {
         isCurrent: current,
         fallback: profile.id == userId ? profile : null,
         onFresh: (fresh) {
+          if (!current()) return;
+          profileConfirmed = true;
           writeProjectSnapshot(HomeSnapshotSection.profile, [fresh]);
           if (cache != null &&
               cacheScope != null &&
@@ -302,9 +294,11 @@ class HomeDashboardService {
           }
         },
         onCached: (cached) {
+          if (!current() || profileFromCache) return;
           profile = cached;
           publish();
         }).then((value) {
+      if (!current() || (!profileConfirmed && profile.id == userId)) return;
       profile = value;
       publish();
     });
@@ -338,12 +332,14 @@ class HomeDashboardService {
       publish();
     });
     await Future.wait<void>([
+      ...cacheReads,
       profileWork,
       assignmentsWork,
       _loadTodayLessons(scheduleDate).timeout(const Duration(seconds: 15)).then(
           (value) {
         if (!current()) return;
         lessons = value;
+        scheduleConfirmed = true;
         scheduleFromCache = false;
         scheduleStatus = null;
         publish();
@@ -538,6 +534,84 @@ class HomeDashboardService {
     return _fetchNewsImage(key);
   }
 
+  Future<Uint8List?> resolveGuardedStoryImage(
+      HomeNewsItem item, OnlineSideEffectBarrier barrier,
+      {required bool Function() current}) async {
+    final key = item.imageCacheKey;
+    if (key == null || !current()) return null;
+    final cached = await _publicImages.read(key);
+    if (!current()) return null;
+    if (cached.state == NewsImageReadState.hit) return cached.bytes;
+    final result = await barrier.run(() async =>
+        (bytes: await _downloadGuardedStoryImage(key.path, barrier, current)));
+    return current() ? result?.bytes : null;
+  }
+
+  Future<Uint8List?> _downloadGuardedStoryImage(
+    String path,
+    OnlineSideEffectBarrier barrier,
+    bool Function() current,
+  ) async {
+    final session = _sb.auth.currentSession;
+    final apiKey = _sb.auth.headers['apikey'];
+    if (!current() || session == null || apiKey == null) return null;
+    final project = Uri.parse(_sb.rest.url);
+    if (project.scheme != 'https' || project.userInfo.isNotEmpty) return null;
+    final client = _ownsHttpClient ? createNewsCoverHttpClient() : _http;
+    final abort = Completer<void>();
+    void stop() {
+      if (abort.isCompleted) return;
+      abort.complete();
+      if (_ownsHttpClient) client.close();
+    }
+
+    final unregister = barrier.onClose(stop);
+    final timeout = Timer(const Duration(seconds: 12), stop);
+    try {
+      if (!current() || abort.isCompleted) return null;
+      final signing = http.AbortableRequest(
+        'POST', project.resolve('/functions/v1/news-media'),
+        abortTrigger: abort.future,
+      )
+        ..followRedirects = false
+        ..headers.addAll({
+          'apikey': apiKey,
+          'Authorization': 'Bearer ${session.accessToken}',
+          'Content-Type': 'application/json',
+        })
+        ..body = jsonEncode({'action': 'createDownload', 'path': path});
+      final signed = await http.Response.fromStream(await client.send(signing));
+      if (!current() || abort.isCompleted || signed.statusCode != 200) return null;
+      final data = jsonDecode(signed.body);
+      final value = data is Map ? data['signedUrl'] : null;
+      final url = value is String ? Uri.tryParse(value) : null;
+      if (url == null || url.userInfo.isNotEmpty || url.origin != project.origin) {
+        return null;
+      }
+      final downloading = http.AbortableRequest('GET', url, abortTrigger: abort.future)
+        ..followRedirects = false;
+      final download = await client.send(downloading);
+      if (!current() || download.statusCode != 200) {
+        await download.stream.listen(null).cancel();
+        return null;
+      }
+      final buffer = BytesBuilder(copy: false);
+      await for (final chunk in download.stream) {
+        if (!current() || abort.isCompleted || buffer.length + chunk.length > 8 * 1024 * 1024) {
+          return null;
+        }
+        buffer.add(chunk);
+      }
+      return buffer.isEmpty || !current() ? null : buffer.takeBytes();
+    } catch (_) {
+      return null;
+    } finally {
+      unregister();
+      timeout.cancel();
+      stop();
+    }
+  }
+
   Future<Uint8List?> _fetchNewsImage(NewsImageCacheKey key) {
     return _publicImages.getOrFetch(key, () => _downloadNewsImage(key.path));
   }
@@ -565,8 +639,7 @@ class HomeDashboardService {
         debugPrint('[home] news image createDownload empty url');
         return null;
       }
-      final download = await _http
-          .get(Uri.parse(signedUrl))
+      final download = await _http.get(Uri.parse(signedUrl))
           .timeout(const Duration(seconds: 45));
       if (download.statusCode != 200) {
         debugPrint(
@@ -719,9 +792,8 @@ class HomeDashboardService {
         }
         if (_sessionScope == null) {
           await prefs.setString('user', jsonEncode(fresh));
-        } else {
-          onFresh?.call(fresh);
         }
+        onFresh?.call(fresh);
         return HomeUserProfile.fromMap(fresh);
       }
     } catch (e) {

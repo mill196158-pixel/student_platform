@@ -68,6 +68,7 @@ class HomeUserProfile {
   final String name;
   final String surname;
   final String groupName;
+  final String university;
   final String avatarUrl;
   final String status;
 
@@ -76,6 +77,7 @@ class HomeUserProfile {
     this.name = '',
     this.surname = '',
     this.groupName = '',
+    this.university = '',
     this.avatarUrl = '',
     this.status = '',
   });
@@ -96,6 +98,7 @@ class HomeUserProfile {
       name: _readString(map, 'name'),
       surname: _readString(map, 'surname'),
       groupName: _readString(map, 'group_name'),
+      university: _readString(map, 'university'),
       avatarUrl: _readString(map, 'avatar_url'),
       status: _readString(map, 'status'),
     );

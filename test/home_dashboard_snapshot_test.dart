@@ -96,9 +96,9 @@ void main() {
       final work = service.load(onUpdate: updates.add);
       await Future<void>.delayed(const Duration(milliseconds: 1100));
       expect(updates, isNotEmpty);
-      expect(updates.first.profile.name, 'Сохранённый профиль');
-      expect(updates.first.assignments.single.assignment.id, 'saved-task');
-      expect(updates.first.scheduleStatus, isNot('Сохранённое расписание'));
+      expect(updates.last.profile.name, 'Сохранённый профиль');
+      expect(updates.last.assignments.single.assignment.id, 'saved-task');
+      expect(updates.last.scheduleStatus, isNot('Сохранённое расписание'));
       if (online) {
         schedule.result.complete([Lesson(id: 'fresh', date: MskDate.today(), week: 1,
           day: 'ПН', pairNum: 1, start: const TimeOfDay(hour: 9, minute: 0),
@@ -141,11 +141,12 @@ void main() {
     final work = service.load(onUpdate: updates.add);
     await Future<void>.delayed(const Duration(milliseconds: 20));
     source.invalidateForSignOut();
+    final updateCount = updates.length;
     await expectLater(work, throwsA(isA<HomeLoadCancelled>()));
-    expect(updates, isEmpty);
+    expect(updates.length, updateCount);
     gate.complete(prefs);
     await Future<void>.delayed(const Duration(milliseconds: 20));
-    expect(updates, isEmpty);
+    expect(updates.length, updateCount);
     service.dispose(); source.dispose(); await client.dispose();
   });
   test('existing dashboard publishes cached sections before stalled requests',
@@ -223,13 +224,18 @@ void main() {
         sessionScope: source,
         snapshotCache: cache);
     final work = service.load(onUpdate: updates.add);
-    for (var i = 0; i < 30 && updates.isEmpty; i++) {
+    bool completeSnapshot(HomeDashboardData update) =>
+        update.todayLessons.isNotEmpty &&
+        update.assignments.isNotEmpty &&
+        update.profile.name == 'Cached Student';
+    for (var i = 0; i < 30 && !updates.any(completeSnapshot); i++) {
       await Future<void>.delayed(const Duration(milliseconds: 2));
     }
-    expect(updates, isNotEmpty);
-    expect(updates.first.todayLessons.single.id, 'l');
-    expect(updates.first.assignments.single.assignment.id, 't');
-    expect(updates.first.profile.name, 'Cached Student');
+    expect(updates.any(completeSnapshot), isTrue);
+    final restored = updates.firstWhere(completeSnapshot);
+    expect(restored.todayLessons.single.id, 'l');
+    expect(restored.assignments.single.assignment.id, 't');
+    expect(restored.profile.name, 'Cached Student');
     networkGate.complete();
     schedule.result.completeError(StateError('offline'));
     learning.teams.completeError(StateError('offline'));

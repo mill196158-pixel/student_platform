@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -47,6 +48,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   Map<String, dynamic>? _user;
   bool _loading = true;
   bool _cachedUnavailable = false;
+  int _cachedProfileGeneration = 0;
+  Uint8List? _cachedAvatar;
+  String? _onlineOwner;
+  int _onlineProfileGeneration = 0;
+  StreamSubscription<AuthState>? _authChanges;
   bool _boundaryInvalidated = false;
   final _cachedBoundaryEnd = Completer<void>();
   bool get _cacheOnly =>
@@ -83,7 +89,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // chat ids для суммирования unread
 
-  String? get _uid => _sb.auth.currentUser?.id ?? (_user?['id'] as String?);
+  String? get _uid => _sb.auth.currentUser?.id;
 
   // ——— helpers for logs ———
   String _ts() => DateTime.now().toIso8601String().substring(11, 23);
@@ -93,9 +99,14 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.initState();
     if (_cacheOnly) {
       widget.cachedReader?.accessChanges.addListener(_onCachedAccessChanged);
+      CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)
+          ?.addListener(_onCachedProfileRefresh);
       unawaited(_loadCachedProfile());
       return;
     }
+    _onlineOwner = _sb.auth.currentUser?.id;
+    _authChanges =
+        _sb.auth.onAuthStateChange.listen((_) => _onOnlineOwnerChanged());
     WidgetsBinding.instance.addObserver(this);
     // слушаем активность от родителя
     widget.activeListenable?.addListener(_onActiveChanged);
@@ -274,6 +285,9 @@ class _ProfileScreenState extends State<ProfileScreen>
   void dispose() {
     if (!_cachedBoundaryEnd.isCompleted) _cachedBoundaryEnd.complete();
     widget.cachedReader?.accessChanges.removeListener(_onCachedAccessChanged);
+    CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)
+        ?.removeListener(_onCachedProfileRefresh);
+    unawaited(_authChanges?.cancel());
     widget.activeListenable?.removeListener(_onActiveChanged);
     routeObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
@@ -338,12 +352,19 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (_cacheOnly || _boundaryInvalidated) return;
     debugPrint('${_ts()} [Profile] boot start');
     // 1) локальный пользователь (для шапки/группы)
+    final generation = _onlineProfileGeneration;
     await _loadLocal();
-    if (!mounted || _cacheOnly || _boundaryInvalidated) return;
+    if (!mounted ||
+        _cacheOnly ||
+        _boundaryInvalidated ||
+        generation != _onlineProfileGeneration) return;
     // 2) гарантируем валидную сессию
     if (mounted) setState(() => _loading = false);
     await _ensureSession();
-    if (!mounted || _cacheOnly || _boundaryInvalidated) return;
+    if (!mounted ||
+        _cacheOnly ||
+        _boundaryInvalidated ||
+        generation != _onlineProfileGeneration) return;
     if (_user == null) {
       try {
         await _refreshHeader();
@@ -393,16 +414,44 @@ class _ProfileScreenState extends State<ProfileScreen>
     return mounted;
   }
 
+  void _onOnlineOwnerChanged() {
+    final owner = _sb.auth.currentUser?.id;
+    if (!mounted ||
+        _cacheOnly ||
+        _boundaryInvalidated ||
+        owner == _onlineOwner) {
+      return;
+    }
+    _onlineOwner = owner;
+    _onlineProfileGeneration++;
+    _lastPollStartedAt = null;
+    setState(() {
+      _user = null;
+      _friendsCount = _requestsCount = _unreadTotal = 0;
+      _loading = owner != null;
+    });
+    if (owner != null) unawaited(_boot());
+  }
+
+  bool _isOnlineProfileCurrent(String owner, int generation) =>
+      mounted &&
+      !_cacheOnly &&
+      !_boundaryInvalidated &&
+      generation == _onlineProfileGeneration &&
+      _sb.auth.currentUser?.id == owner;
+
   Future<void> _loadLocal() async {
+    final owner = _sb.auth.currentUser?.id;
+    if (owner == null) return;
+    final generation = _onlineProfileGeneration;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final s = prefs.getString('user');
-      if (s != null && s.isNotEmpty) {
-        final candidate = jsonDecode(s) as Map<String, dynamic>;
-        _user = _sb.auth.currentUser?.id != null &&
-                candidate['id'] == _sb.auth.currentUser?.id
-            ? candidate
-            : null;
+      final stored = prefs.getString('user');
+      if (stored == null || stored.isEmpty) return;
+      final candidate = jsonDecode(stored) as Map<String, dynamic>;
+      if (_isOnlineProfileCurrent(owner, generation) &&
+          candidate['id'] == owner) {
+        setState(() => _user = candidate);
       }
     } catch (_) {}
   }
@@ -441,18 +490,18 @@ class _ProfileScreenState extends State<ProfileScreen>
         now.difference(lastStartedAt) < const Duration(seconds: 2)) {
       return;
     }
-    _lastPollStartedAt = now;
-
     if (_pollInFlight) {
       _repollPending = true;
       return;
     }
+    _lastPollStartedAt = now;
     _pollInFlight = true;
     debugPrint('${_ts()} [Profile] pollOnce begin');
     try {
       // не обновляем сессию на каждом тике — это медленно
 
       final id = _uid;
+      final generation = _onlineProfileGeneration;
       if (!mounted || id == null || id.isEmpty) {
         _applyZeros();
         return;
@@ -465,7 +514,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       final fr = await friendsAndReqF;
       final ut = await unreadF;
 
-      if (!mounted || _cacheOnly || _boundaryInvalidated) return;
+      if (!_isOnlineProfileCurrent(id, generation)) return;
 
       final (fc, rc) = fr;
       final newFriends = fc ?? 0;
@@ -572,12 +621,16 @@ class _ProfileScreenState extends State<ProfileScreen>
   // ===== ручной refresh =====
   Future<void> _refreshHeader() async {
     final id = _sb.auth.currentUser?.id;
-    bool current() => mounted && !_cacheOnly && !_boundaryInvalidated &&
-        id != null && _sb.auth.currentUser?.id == id;
-    if (id == null || !current()) return;
-    final fresh = await _sb.from('users')
-        .select('id, login, name, surname, university, group_name, avatar_url, status')
-        .eq('id', id).maybeSingle();
+    if (id == null) return;
+    final generation = _onlineProfileGeneration;
+    bool current() => _isOnlineProfileCurrent(id, generation);
+    if (!current()) return;
+    final fresh = await _sb
+        .from('users')
+        .select(
+            'id, login, name, surname, university, group_name, avatar_url, status')
+        .eq('id', id)
+        .maybeSingle();
     if (!current() || fresh == null || fresh['id'] != id) return;
     final prefs = await SharedPreferences.getInstance();
     if (!current()) return;
@@ -621,47 +674,67 @@ class _ProfileScreenState extends State<ProfileScreen>
       return;
     oldWidget.cachedReader?.accessChanges
         .removeListener(_onCachedAccessChanged);
+    CachedHomeScheduleReader.homeRefreshFor(oldWidget.cachedReader)
+        ?.removeListener(_onCachedProfileRefresh);
     _boundaryInvalidated = true;
     if (!_cachedBoundaryEnd.isCompleted) _cachedBoundaryEnd.complete();
     _feedLoadGeneration++;
     _feedMediaGeneration++;
     _stopPolling();
+    _cachedProfileGeneration++;
     _user = null;
+    _cachedAvatar = null;
     _loading = false;
     _cachedUnavailable = true;
   }
 
   void _onCachedAccessChanged() {
     if (!mounted || (widget.cachedReader?.canRead ?? false)) return;
+    _cachedProfileGeneration++;
     setState(() {
       _user = null;
+      _cachedAvatar = null;
       _loading = false;
       _cachedUnavailable = true;
     });
   }
 
+  void _onCachedProfileRefresh() {
+    if (mounted && _user == null) unawaited(_loadCachedProfile());
+  }
+
   Future<void> _loadCachedProfile() async {
     final reader = widget.cachedReader;
+    final caps = widget.cachedCapabilities;
+    final permit = caps?.capture(SessionCapability.cachedRead);
     if (reader == null ||
         widget.cachedChats == null ||
-        widget.cachedCapabilities == null) {
-      if (mounted)
+        caps == null ||
+        permit == null ||
+        !reader.permitsContent(caps, permit)) {
+      if (mounted) {
         setState(() {
           _loading = false;
           _cachedUnavailable = true;
         });
+      }
       return;
     }
+    final generation = ++_cachedProfileGeneration;
+    bool current() =>
+        mounted &&
+        !_boundaryInvalidated &&
+        identical(reader, widget.cachedReader) &&
+        identical(caps, widget.cachedCapabilities) &&
+        generation == _cachedProfileGeneration &&
+        reader.permitsContent(caps, permit);
     try {
-      final dashboard = await reader.readDashboard();
-      if (!mounted ||
-          _boundaryInvalidated ||
-          !identical(reader, widget.cachedReader) ||
-          !reader.canRead) return;
-      final profile = dashboard.profile;
-      if (profile.id.isEmpty) {
+      final profile = await reader.readProfile();
+      if (!current()) return;
+      if (profile == null || profile.id != permit.userId) {
         setState(() {
           _user = null;
+          _cachedAvatar = null;
           _loading = false;
           _cachedUnavailable = true;
         });
@@ -673,19 +746,29 @@ class _ProfileScreenState extends State<ProfileScreen>
           'name': profile.name,
           'surname': profile.surname,
           'group_name': profile.groupName,
-          'status': profile.status
+          'university': profile.university,
+          'status': profile.status,
         };
         _loading = false;
         _cachedUnavailable = false;
       });
+      final avatar = await readSavedProfileAvatar(profile.id, profile.avatarUrl,
+          isCurrent: current);
+      if (avatar != null && current()) setState(() => _cachedAvatar = avatar);
     } catch (_) {
-      if (mounted)
+      if (current() && _user == null) {
         setState(() {
-          _user = null;
           _loading = false;
           _cachedUnavailable = true;
         });
+      }
     }
+  }
+
+  void _explainOfflineProfileAction() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Это действие доступно после подключения к интернету.'),
+    ));
   }
 
   void _openCachedMessages() {
@@ -704,7 +787,9 @@ class _ProfileScreenState extends State<ProfileScreen>
     final reader = widget.cachedReader, caps = widget.cachedCapabilities;
     final permit = caps?.capture(SessionCapability.cachedRead);
     if (reader == null || caps == null || permit == null) return null;
-    bool current() => mounted && !_cachedBoundaryEnd.isCompleted &&
+    bool current() =>
+        mounted &&
+        !_cachedBoundaryEnd.isCompleted &&
         identical(widget.cachedReader, reader) &&
         identical(widget.cachedCapabilities, caps) &&
         reader.permitsContent(caps, permit);
@@ -722,8 +807,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                       listenable: access,
                       builder: (_, __) => current()
                           ? CacheDiagnosticsScreen(canAccess: current)
-                          : Scaffold(appBar: AppBar(),
-                              body: const Center(child: Text('Данные недоступны.')))))));
+                          : Scaffold(
+                              appBar: AppBar(),
+                              body: const Center(
+                                  child: Text('Данные недоступны.')))))));
         });
   }
 
@@ -746,7 +833,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           TextButton(
               onPressed: _openCachedMessages, child: const Text('Сообщения')),
         if (canRead)
-          TextButton(onPressed: _logout, child: const Text('Выйти из аккаунта')),
+          TextButton(
+              onPressed: _logout, child: const Text('Выйти из аккаунта')),
       ])));
     }
     final u = _user!;
@@ -755,23 +843,47 @@ class _ProfileScreenState extends State<ProfileScreen>
         .where((s) => s.isNotEmpty)
         .join(' ');
     return Scaffold(
-        appBar: storage == null ? null : AppBar(actions: [storage]),
+        appBar: storage == null
+            ? null
+            : AppBar(
+                title: storage,
+                centerTitle: true,
+                toolbarHeight: MediaQuery.textScalerOf(context).scale(16) > 20
+                    ? 76
+                    : kToolbarHeight,
+              ),
         body: StudentProfileScreenPreview(
-      displayName: name.isEmpty ? 'Студент' : name,
-      groupLabel: (u['group_name'] ?? '').toString(),
-      statusLabel: (u['status'] ?? '').toString(),
-      padding: EdgeInsets.fromLTRB(
-          16, storage == null ? MediaQuery.paddingOf(context).top + 16 : 16, 16, 24),
-      onMessagesTap:
-          widget.cachedChats == null || widget.cachedCapabilities == null
-              ? null
-              : _openCachedMessages,
-      footer: TextButton.icon(
-        onPressed: _logout,
-        icon: const Icon(Icons.logout),
-        label: const Text('Выйти из аккаунта'),
-      ),
-    ));
+          displayName: name.isEmpty ? 'Студент' : name,
+          groupLabel: (u['group_name'] ?? '').toString(),
+          universityLabel: (u['university'] ?? '').toString(),
+          statusLabel: (u['status'] ?? '').toString(),
+          avatarBytes: _cachedAvatar,
+          onFriendsTap: _explainOfflineProfileAction,
+          onDiaryTap: _explainOfflineProfileAction,
+          onMapTap: _explainOfflineProfileAction,
+          onReviewsTap: _explainOfflineProfileAction,
+          padding: EdgeInsets.fromLTRB(
+              16,
+              storage == null ? MediaQuery.paddingOf(context).top + 16 : 16,
+              16,
+              24),
+          onMessagesTap:
+              widget.cachedChats == null || widget.cachedCapabilities == null
+                  ? null
+                  : _openCachedMessages,
+          footer: Column(children: [
+            Text(
+                'Доступны сохранённый профиль и загруженные чаты. Для остальных действий понадобится интернет.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _logout,
+              icon: const Icon(Icons.logout),
+              label: const Text('Выйти из аккаунта'),
+            ),
+          ]),
+        ));
   }
 
   // ===== UI =====
@@ -801,7 +913,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       );
     }
 
-    final u = _user;
+    final u = _user?['id'] == _sb.auth.currentUser?.id ? _user : null;
     final first = (u?['name'] ?? '') as String;
     final last = (u?['surname'] ?? '') as String;
     final uni = (u?['university'] ?? '') as String;
@@ -1127,7 +1239,8 @@ class _MapSpbgasuScreenState extends State<MapSpbgasuScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Карта СПБГАСУ')),
       body: Stack(fit: StackFit.expand, children: [
-        Offstage(offstage: _failed, child: WebViewWidget(controller: _controller)),
+        Offstage(
+            offstage: _failed, child: WebViewWidget(controller: _controller)),
         if (_failed)
           Center(
             child: Padding(
@@ -1140,7 +1253,8 @@ class _MapSpbgasuScreenState extends State<MapSpbgasuScreen> {
                 const Text('Проверь подключение к интернету.',
                     textAlign: TextAlign.center),
                 const SizedBox(height: 16),
-                OutlinedButton(onPressed: _openMap, child: const Text('Повторить')),
+                OutlinedButton(
+                    onPressed: _openMap, child: const Text('Повторить')),
               ]),
             ),
           ),

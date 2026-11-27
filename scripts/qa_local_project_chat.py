@@ -31,7 +31,8 @@ def main():
                 def setup(schema, accounts):
                     fields = ("group", "year", "term", "curriculum_project", "curriculum_control",
                               "off_project", "off_control", "team_project", "team_control",
-                              "chat_project", "chat_control", "file_project", "file_control")
+                              "chat_project", "chat_control", "file_project", "file_control",
+                              "curriculum_empty", "off_empty", "team_empty", "chat_empty")
                     ids = {key: str(uuid4()) for key in fields}
                     template = (ROOT / "scripts/qa_project_chat_fixture.sql").read_text("utf-8")
                     migration = (ROOT / "supabase/migrations/20260825202929_academic_plan_import_persistence.sql").read_text("utf-8")
@@ -50,6 +51,9 @@ def main():
                                  "STUDENT_PROJECT_CHAT_LOCAL", required_markers=(
                                      "PASS ordinary login, materials, actual course assessment, exact team, native PDF and SHA-256",
                                      "PASS 036 two system Back requests restored",
+                                     "PASS iPhone follow-up: slow rights and independent send",
+                                     "PASS iPhone follow-up: header and history",
+                                     "PASS iPhone follow-up: empty active and archived teams",
                                      "PASS iPhone follow-up: list and forward",
                                      "PASS iPhone follow-up: composer denied",))
             finally:

@@ -50,6 +50,8 @@ import 'chat/topics/create_topic_selection_screen.dart';
 import 'chat/collections/create_collection_screen.dart';
 import 'chat/data/chat_action_cards_cache.dart';
 import 'chat/data/chat_composer_capabilities_repository.dart';
+import 'chat/data/team_chat_send_access.dart';
+import 'chat/composer/chat_composer_gate.dart';
 import 'chat/models/chat_composer_capabilities.dart';
 import 'chat/models/chat_card_envelope.dart';
 import '../../chats/core/forward_payload.dart';
@@ -126,7 +128,11 @@ class ChatTab extends StatefulWidget {
   State<ChatTab> createState() => _ChatTabState();
 }
 
-class _ChatTabState extends State<ChatTab> {
+class _ChatTabState extends State<ChatTab>
+    with AutomaticKeepAliveClientMixin<ChatTab> {
+  @override
+  bool get wantKeepAlive => true;
+
   static const bool enableTypingIndicator = false;
   static const List<_ClipboardFileKind> _clipboardFileKinds = [
     _ClipboardFileKind(Formats.png, 'png', 'image/png', true),
@@ -238,13 +244,13 @@ class _ChatTabState extends State<ChatTab> {
   final _capsRepo = ChatComposerCapabilitiesRepository();
   ChatComposerCapabilities? _composerCaps;
 
-  bool get _readOnly {
-    final capabilities = _composerCaps;
-    return widget.readOnly ||
-        (capabilities != null && !capabilities.loading &&
-            !capabilities.fromCache &&
-            capabilities.reasonFor('propose_assignment') == 'not_member');
-  }
+  TeamChatSendAccess? _sendAccess;
+  int _sendAccessRequest = 0;
+  bool _sendAccessLoading = false;
+
+  bool get _canSend => !widget.readOnly &&
+      _sendAccess == TeamChatSendAccess.allowed && _draftCanEdit;
+
   bool _capsLoading = true;
   bool _canDeleteMessage(Message m) {
     final uid = Supabase.instance.client.auth.currentUser?.id;
@@ -387,10 +393,10 @@ class _ChatTabState extends State<ChatTab> {
       widget.onSelectingChanged?.call(value);
       return;
     }
-    setState(() {
-      _selectingMessages = value;
+    _chatScroll.keepVisibleMessage(() {
+      setState(() => _selectingMessages = value);
+      widget.onSelectingChanged?.call(value);
     });
-    widget.onSelectingChanged?.call(value);
   }
 
   bool _showJump = false;
@@ -581,7 +587,10 @@ class _ChatTabState extends State<ChatTab> {
   @override
   void initState() {
     super.initState();
-    _readLifecycle = AppLifecycleListener(onResume: _scheduleSeenCheck);
+    _readLifecycle = AppLifecycleListener(onResume: () {
+      _scheduleSeenCheck();
+      if (widget.isActive) unawaited(_refreshSendAccess());
+    });
     _draftSeed = DraftSessionSeed.capture(AuthSessionScopeHost.maybeRead(context));
     _currentChatId = context.read<TeamCubit>().state.team.id;
     DraftRecoveryJournal.changes.addListener(_onDraftJournalChanged);
@@ -645,6 +654,7 @@ class _ChatTabState extends State<ChatTab> {
     _loadBlockedUserIds();
 
     // Composer + capabilities (stable menu; independent of message list).
+    unawaited(_refreshSendAccess());
     // ignore: discarded_futures
     _loadComposerCapabilities();
 
@@ -662,7 +672,7 @@ class _ChatTabState extends State<ChatTab> {
 
     _keyboardChannel.setMethodCallHandler((call) async {
       if (call.method == 'onKeyboardImagePicked' || call.method == 'onPicked') {
-        if (!mounted || _readOnly || !_draftCanEdit) return null;
+        if (!mounted || !widget.isActive || !_canSend) return null;
         final path = (call.arguments ?? '') as String;
         if (path.isNotEmpty && mounted) {
           // Добавляем файл в pending список
@@ -673,6 +683,7 @@ class _ChatTabState extends State<ChatTab> {
             size: await File(path).length(),
             isImage: true,
           );
+          if (!mounted || !widget.isActive || !_canSend) return null;
           _att.add(file);
           final teamId = context.read<TeamCubit>().state.team.id;
           final chatId = await _getChatIdForTeam(teamId);
@@ -712,7 +723,18 @@ class _ChatTabState extends State<ChatTab> {
       _deeplinkHighlightStarted = false;
       _deeplinkHighlightId = null;
     }
-    if (!oldWidget.isActive && widget.isActive) _scheduleSeenCheck();
+    if (oldWidget.readOnly != widget.readOnly) {
+      _sendAccessRequest++;
+      _sendAccess = null;
+      _sendAccessLoading = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_refreshSendAccess());
+      });
+    }
+    if (!oldWidget.isActive && widget.isActive) {
+      _scheduleSeenCheck();
+      unawaited(_refreshSendAccess());
+    }
   }
 
   @override
@@ -1161,8 +1183,9 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   Future<void> _createAssignmentFromComposerAction() async {
+    if (!_canSend || _composerCaps?.canProposeAssignment != true) return;
     final res = await showAssignmentFormDialog(context);
-    if (res == null || !mounted) return;
+    if (res == null || !mounted || !_canSend) return;
 
     try {
       await context.read<TeamCubit>().proposeAssignment(
@@ -1583,7 +1606,7 @@ class _ChatTabState extends State<ChatTab> {
 
   void _send(BuildContext context) async {
     // защита от повторных тапов и отправки во время аплоада
-    if (_readOnly || !_draftCanEdit || _isUploadingAttachments ||
+    if (!_canSend || _isUploadingAttachments ||
         _hasFailedAttachments || _isSending) return;
 
     _isSending = true;
@@ -1829,12 +1852,16 @@ class _ChatTabState extends State<ChatTab> {
         if (!ok) return; // Ждём загрузку файлов, не чистим поля
       } else {
         // Только текст
-        final id = await context.read<TeamCubit>().sendMessage(
-              'me',
-              text,
-              replyToId: replyId,
-            );
-        if (id == null || id.isEmpty) return;
+        try {
+          final id = await context.read<TeamCubit>().sendMessage(
+                'me',
+                text,
+                replyToId: replyId,
+              );
+          if (id == null || id.isEmpty) return;
+        } on UnconfirmedMessageSend {
+          // The chat retains the text with its own delivery status.
+        }
       }
       if (!sameSend()) return;
       final cleanup = confirmedForwardCleanup(sentText: composerText,
@@ -2079,6 +2106,7 @@ class _ChatTabState extends State<ChatTab> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final mq = MediaQuery.of(context);
     final scale = mq.textScaleFactor.clamp(1.0, 1.2);
     final themed = Theme.of(context);
@@ -2146,23 +2174,23 @@ class _ChatTabState extends State<ChatTab> {
 
           // initialScrollOffset уже сдвигает в конец, доп.скролл не нужен
 
-          final readOnly = _readOnly;
+          final canSend = _canSend;
 
           return Column(
             children: [
-              if (!readOnly && !_selectingMessages && _draftReady &&
+              if (canSend && !_selectingMessages && _draftReady &&
                   (_draftOwner?.canRead ?? false) && _legacyDraftAvailable)
                 TextButton(onPressed: () => unawaited(_importLegacyDraft()),
                     child: const Text('Восстановить прежний черновик')),
-              if (!readOnly && !_selectingMessages && _draftReady &&
+              if (canSend && !_selectingMessages && _draftReady &&
                   (_draftOwner?.canRead ?? false) && _recoveredScopedDraft != null)
                 TextButton(onPressed: () => unawaited(_restorePreviousAccountDraft()),
                     child: const Text('Восстановить сохранённый черновик')),
-              if (!readOnly && !_selectingMessages && _draftReady &&
+              if (canSend && !_selectingMessages && _draftReady &&
                   (_draftOwner?.canRead ?? false) && _recoveryDrafts.isNotEmpty)
                 TextButton(onPressed: () => unawaited(_restoreRecoveryDraft()),
                     child: const Text('Восстановить несохранённый черновик')),
-              if (!readOnly && !_selectingMessages && _draftError &&
+              if (canSend && !_selectingMessages && _draftError &&
                   (_draftSeed?.sameEpoch ?? false))
                 TextButton(onPressed: () => unawaited(_initDraftAndForward()),
                     child: const Text('Черновик пока не сохраняется. Повторить')),
@@ -2170,47 +2198,6 @@ class _ChatTabState extends State<ChatTab> {
                 TopSelectionBar(
                   count: _selectedMessageIds.length,
                   onClose: _exitSelection,
-                ),
-              if (readOnly)
-                Material(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .surfaceContainerHighest
-                      .withValues(alpha: 0.72),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.lock_outline_rounded,
-                          size: 16,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.62),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            widget.readOnly
-                                ? 'Только чтение. Семестр завершён.'
-                                : 'Только чтение. Отправка недоступна.',
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurface
-                                          .withValues(alpha: 0.72),
-                                    ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               if (_search.isActive)
                 InlineSearchBar(
@@ -2224,7 +2211,7 @@ class _ChatTabState extends State<ChatTab> {
                   pins: pins,
                   controller: _pinsCtl,
                   onOpen: _onOpen,
-                  onUnpin: readOnly
+                  onUnpin: !canSend
                       ? null
                       : (p) async {
                           if (p.type == PinType.message && p.refId != null) {
@@ -2276,14 +2263,14 @@ class _ChatTabState extends State<ChatTab> {
                           onRevealBlockedMessage: (id) {
                             setState(() => _revealedBlockedMessageIds.add(id));
                           },
-                          onReply: readOnly || !_draftCanEdit
+                          onReply: !canSend
                               ? (_) {}
                               : (m) {
                                   setState(() => _replyTo = m);
                                   _draftRevision++;
                                   _saveDraftDebounced();
                                 },
-                          onLongPress: readOnly
+                          onLongPress: !canSend
                               ? (_, __, ___, ____, _____, ______) {}
                               : (ctx, m, rect, bytes, replyPreview, fallback) =>
                                   _showMessageActions(ctx, m,
@@ -2292,30 +2279,29 @@ class _ChatTabState extends State<ChatTab> {
                                       replyPreview: replyPreview,
                                       fallbackPosition: fallback),
                           onReplyTap: (id) => _scrollToMessage(id),
-                          onReact: readOnly
+                          onReact: !canSend
                               ? (_, __) {}
                               : (ctx, id) => ca.ChatActions.showReactionPicker(
                                     ctx,
                                     (emoji) => _addReaction(id, emoji),
                                   ),
-                          onReactionSelected: readOnly ? null : _addReaction,
+                          onReactionSelected: canSend ? _addReaction : null,
                           canDeleteMessage:
-                              readOnly ? (_) => false : _canDeleteMessage,
+                              canSend ? _canDeleteMessage : (_) => false,
                           canEditMessage:
-                              readOnly ? (_) => false : _canEditMessage,
+                              canSend ? _canEditMessage : (_) => false,
                           onMenuAction:
-                              readOnly ? null : _handlePackageMenuAction,
-                          onRetryFailedText: (m) => context
-                              .read<TeamCubit>()
-                              .retryFailedTextMessage(m),
-                          onAttachFile: () {
-                            // ignore: unawaited_futures
-                            _pickAndUploadFileForComposer();
-                          },
-                          onCreateAssignment: () {
-                            // ignore: unawaited_futures
-                            _createAssignmentFromComposerAction();
-                          },
+                              canSend ? _handlePackageMenuAction : null,
+                          onRetryFailedText: canSend
+                              ? (m) => context.read<TeamCubit>().retryFailedTextMessage(m)
+                              : null,
+                          onAttachFile: canSend
+                              ? () => unawaited(_pickAndUploadFileForComposer())
+                              : null,
+                          onCreateAssignment: canSend &&
+                                  _composerCaps?.canProposeAssignment == true
+                              ? () => unawaited(_createAssignmentFromComposerAction())
+                              : null,
                           canModerateTopicSelection:
                               _composerCaps?.canModerateTopicSelection,
                           canModerateCollection:
@@ -2396,23 +2382,10 @@ class _ChatTabState extends State<ChatTab> {
                     );
                   },
                 )
-              else if (!readOnly &&
-                  (_draftSeed?.matchesCurrentIdentity != true ||
-                      _draftOwner?.canRead == false))
-                const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('Сессия изменилась. Закройте и откройте чат снова.'),
-                )
-              else if (!readOnly)
+              else if (!canSend)
+                _buildUnavailableComposer()
+              else
                 ChatComposerBar(
-                  unavailableLabel: _draftCanEdit
-                      ? null
-                      : _draftError
-                          ? 'Не удалось открыть черновик. Повторить'
-                          : 'Подключение к чату…',
-                  onRetryAvailability: !_draftCanEdit && _draftError
-                      ? () => unawaited(_initDraftAndForward())
-                      : null,
                   controller: _ctrl,
                   focusNode: _composerFocus,
                   replyTo: _replyTo,
@@ -2447,21 +2420,16 @@ class _ChatTabState extends State<ChatTab> {
                   isUploading: _isUploadingAttachments,
                   hasFailedUploads: _hasFailedAttachments,
                   isSending: _isSending,
-                  showProposeInPlus: !readOnly &&
-                      (_composerCaps?.showProposeAssignment ?? true),
-                  showTopicSelectionInPlus: !readOnly &&
-                      (_composerCaps?.showTopicSelection ??
-                          (!state.team.isGroupSpaceChat)),
-                  showCollectionInPlus: !readOnly &&
-                      (_composerCaps?.showCollection ??
-                          state.team.isGroupSpaceChat),
-                  capabilitiesLoading: !readOnly && _capsLoading,
-                  proposeEnabled: !readOnly &&
-                      (_composerCaps?.canProposeAssignment ?? false),
-                  topicSelectionEnabled: !readOnly &&
-                      (_composerCaps?.canCreateTopicSelection ?? false),
-                  collectionEnabled: !readOnly &&
-                      (_composerCaps?.canCreateCollection ?? false),
+                  showProposeInPlus:
+                      _composerCaps?.showProposeAssignment ?? true,
+                  showTopicSelectionInPlus: _composerCaps?.showTopicSelection ??
+                      !state.team.isGroupSpaceChat,
+                  showCollectionInPlus: _composerCaps?.showCollection ??
+                      state.team.isGroupSpaceChat,
+                  capabilitiesLoading: _capsLoading,
+                  proposeEnabled: _composerCaps?.canProposeAssignment ?? false,
+                  topicSelectionEnabled: _composerCaps?.canCreateTopicSelection ?? false,
+                  collectionEnabled: _composerCaps?.canCreateCollection ?? false,
                   proposeDisabledReason:
                       _composerCaps?.reasonLabel('propose_assignment'),
                   topicSelectionDisabledReason:
@@ -2722,6 +2690,74 @@ class _ChatTabState extends State<ChatTab> {
   // Получаем chatId для команды
   Future<String> _getChatIdForTeam(String teamId) =>
       _repo.getMainChatId(teamId);
+
+  Future<void> _refreshSendAccess() async {
+    if (!mounted || widget.readOnly || _sendAccessLoading) return;
+    final seed = _draftSeed;
+    if (seed == null) return;
+    final teamId = context.read<TeamCubit>().state.team.id;
+    final request = ++_sendAccessRequest;
+    _sendAccessLoading = true;
+
+    bool current() => mounted && request == _sendAccessRequest &&
+        !widget.readOnly && context.read<TeamCubit>().state.team.id == teamId;
+
+    var result = TeamChatSendAccess.unavailable;
+    try {
+      await seed.ready.timeout(const Duration(seconds: 3));
+      if (!current()) return;
+      final owner = seed.confirm();
+      if (owner?.canRead != true) return;
+      result = await loadTeamChatSendAccess(
+        Supabase.instance.client,
+        userId: owner!.userId,
+        teamId: teamId,
+        mainChatId: _getChatIdForTeam(teamId),
+        isCurrent: () => current() && owner.canRead,
+      ).timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // A slow connection is not evidence that the chat is read-only.
+    } finally {
+      if (current()) {
+        _sendAccessLoading = false;
+        if (_sendAccess != result) {
+          if (result != TeamChatSendAccess.allowed) _composerFocus.unfocus();
+          setState(() => _sendAccess = result);
+        }
+      }
+    }
+  }
+
+  Widget _buildUnavailableComposer() {
+    if (widget.readOnly) {
+      return const ChatComposerGate.placeholder(
+        status: 'Только чтение. Семестр завершён.',
+      );
+    }
+    if (_draftSeed?.matchesCurrentIdentity != true) {
+      return const ChatComposerGate.placeholder(
+        status: 'Сессия изменилась. Закройте и откройте чат снова.',
+      );
+    }
+    if (_sendAccess == TeamChatSendAccess.readOnly) {
+      return const ChatComposerGate.placeholder(
+        status: 'Только чтение. Отправка недоступна.',
+      );
+    }
+    if (_sendAccess == TeamChatSendAccess.unavailable) {
+      return ChatComposerGate.placeholder(
+        status: 'Не удалось проверить отправку. Повторить',
+        onRetry: () => unawaited(_refreshSendAccess()),
+      );
+    }
+    if (_draftError) {
+      return ChatComposerGate.placeholder(
+        status: 'Не удалось открыть черновик. Повторить',
+        onRetry: () => unawaited(_initDraftAndForward()),
+      );
+    }
+    return const ChatComposerGate.placeholder(status: 'Подключение к чату…');
+  }
 
   Future<void> _loadComposerCapabilities() async {
     if (!mounted) return;

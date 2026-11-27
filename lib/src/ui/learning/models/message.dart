@@ -8,7 +8,7 @@ import '../tabs/chat/models/chat_card_envelope.dart';
 
 enum MessageType { text, file, assignmentDraft, assignmentPublished, forward }
 
-enum MessageDeliveryStatus { sent, sending, failed }
+enum MessageDeliveryStatus { sent, sending, failed, unconfirmed }
 
 // ==== Forward models (общая для ДМ и групп) ====
 class ForwardAttachmentModel {
@@ -107,6 +107,7 @@ class ForwardPayloadModel {
 }
 
 class Message {
+  static const teamSendClientIdPrefix = 'local_team_send_';
   final String id;
   final String
       chatId; // UUID чата (может быть пустым в оптимистичных локальных сообщениях)
@@ -177,6 +178,9 @@ class Message {
       deliveryStatus != MessageDeliveryStatus.sent;
   bool get isSending => deliveryStatus == MessageDeliveryStatus.sending;
   bool get isFailed => deliveryStatus == MessageDeliveryStatus.failed;
+  bool get isUnconfirmed => deliveryStatus == MessageDeliveryStatus.unconfirmed;
+  bool get requiresExplicitAcknowledgement =>
+      isUnconfirmed || (clientId?.startsWith(teamSendClientIdPrefix) ?? false);
 
   bool get isEdited => editedAt != null;
 

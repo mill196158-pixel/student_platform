@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -85,6 +86,31 @@ void main() {
         final file =
             await second.getSingleFile(restored.url, key: restored.cacheKey);
         expect(await file.readAsBytes(), bytes);
+        expect(
+            await readSavedProfileAvatar('a', avatarUrl,
+                isCurrent: () => true, cacheManager: second),
+            bytes);
+        final resized = Uint8List.fromList([...bytes, 17]);
+        await second.putFile(avatarUrl, resized,
+            key: 'resized_w264_h264_${restored.cacheKey}',
+            fileExtension: 'png');
+        expect(
+            await readSavedProfileAvatar('a', avatarUrl,
+                isCurrent: () => true, cacheManager: second),
+            resized);
+        expect(
+            await readSavedProfileAvatar('b', avatarUrl,
+                isCurrent: () => true, cacheManager: second),
+            isNull);
+        expect(
+            await readSavedProfileAvatar('a', '$avatarUrl?v=9',
+                isCurrent: () => true, cacheManager: second),
+            isNull);
+        var permitChecks = 0;
+        expect(
+            await readSavedProfileAvatar('a', avatarUrl,
+                isCurrent: () => permitChecks++ == 0, cacheManager: second),
+            isNull);
         expect(networkCalls, 0);
         expect(
             await second.getFileFromCache((profileAvatarImage('b', avatarUrl)

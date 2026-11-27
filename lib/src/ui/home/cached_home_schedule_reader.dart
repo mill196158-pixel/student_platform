@@ -125,6 +125,19 @@ class CachedHomeScheduleReader {
     return value == null ? null : List<Lesson>.unmodifiable(value);
   }
 
+  /// Loads the profile separately so the Profile tab can paint while saved
+  /// lessons and tasks are still being read.
+  Future<HomeUserProfile?> readProfile() async =>
+      _profileFromSnapshot(await readHome(HomeSnapshotSection.profile));
+
+  HomeUserProfile? _profileFromSnapshot(HomeSectionSnapshot? snapshot) {
+    final items = snapshot?.items;
+    if (items == null || items.length != 1 || items.single['id'] != _permit.userId) {
+      return null;
+    }
+    return HomeUserProfile.fromMap(items.single);
+  }
+
   /// Builds the existing dashboard model without constructing network APIs.
   /// Missing or malformed sections stay explicitly unavailable, not empty.
   Future<HomeDashboardData> readDashboard({DateTime? date}) async {
@@ -140,14 +153,8 @@ class CachedHomeScheduleReader {
       readSection(HomeSnapshotSection.assignments),
     ]);
     _check();
-    final profileSnapshot = snapshots[0].$1;
-    final profileItems = profileSnapshot?.items;
-    final validProfile = profileItems != null &&
-        profileItems.length == 1 &&
-        profileItems.first['id'] == _permit.userId;
-    final profile = validProfile
-        ? HomeUserProfile.fromMap(profileItems.first)
-        : const HomeUserProfile();
+    final profile = _profileFromSnapshot(snapshots[0].$1) ??
+        const HomeUserProfile();
 
     final scheduleSnapshot = snapshots[1].$1;
     var scheduleTemporarilyUnavailable = snapshots[1].$2;

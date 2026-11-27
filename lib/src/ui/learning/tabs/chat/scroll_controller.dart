@@ -15,6 +15,7 @@ class ChatScrollController {
   final ScrollController scroll;
   final Map<String, GlobalKey> messageKeys;
   final TickerProvider? vsync;
+  int _viewportChange = 0;
 
   ChatScrollController(this.scroll, this.messageKeys, {this.vsync});
 
@@ -53,6 +54,67 @@ class ChatScrollController {
       position.maxScrollExtent,
     );
     scroll.jumpTo(target.toDouble());
+  }
+
+  /// Holds the visible history still as the selection header and footer swap.
+  void keepVisibleMessage(VoidCallback change) {
+    final revision = ++_viewportChange;
+    final position = scroll.hasClients ? scroll.position : null;
+    if (position == null || position.isScrollingNotifier.value) {
+      change();
+      return;
+    }
+
+    final pixels = position.pixels;
+    RenderBox? anchor;
+    double? anchorY;
+    var nearest = double.infinity;
+
+    for (final key in messageKeys.values) {
+      // The marker is zero-height. Its enclosing row can still be visible
+      // when a long message starts above the viewport.
+      final row = key.currentContext?.findRenderObject()?.parent;
+      if (row is! RenderBox || !row.attached || !row.hasSize) continue;
+      final viewport = RenderAbstractViewport.maybeOf(row);
+      if (viewport is! RenderBox) continue;
+      final box = viewport as RenderBox;
+      if (!box.hasSize) continue;
+      final height = box.size.height;
+      final top = row.localToGlobal(Offset.zero, ancestor: box).dy;
+      final bottom = top + row.size.height;
+      if (!top.isFinite || bottom <= 0 || top >= height || top == bottom) continue;
+      final visibleCenter = (top.clamp(0, height) + bottom.clamp(0, height)) / 2;
+      final distance = (visibleCenter - height / 2).abs();
+      if (distance < nearest) {
+        nearest = distance;
+        anchor = row;
+        anchorY = row.localToGlobal(Offset.zero).dy;
+      }
+    }
+
+    change();
+
+    if (anchor == null || anchorY == null) return;
+    final row = anchor;
+    final originalY = anchorY;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (revision != _viewportChange ||
+          !scroll.hasClients ||
+          scroll.position != position ||
+          !row.attached ||
+          position.isScrollingNotifier.value ||
+          (position.pixels - pixels).abs() > 1) {
+        return;
+      }
+      final difference = originalY - row.localToGlobal(Offset.zero).dy;
+      if (!difference.isFinite || difference.abs() < .5) return;
+      final direction = position.axisDirection == AxisDirection.up ? 1 : -1;
+      final target = (position.pixels + difference * direction).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((target - position.pixels).abs() >= .5) position.jumpTo(target);
+    });
   }
 
   Future<void> scrollToMessage(

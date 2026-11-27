@@ -24,11 +24,14 @@ void main() {
       (tester) async {
     var allowed = true, clears = 0;
     final budget = _CountingLimit();
-    await tester.pumpWidget(MaterialApp(home: CacheDiagnosticsScreen(
+    await tester.pumpWidget(MaterialApp(
+        home: CacheDiagnosticsScreen(
       canAccess: () => allowed,
       budget: budget,
-      measure: () async => InventorySnapshot(startedAt: DateTime.now(),
-          finishedAt: DateTime.now(), observations: []),
+      measure: () async => InventorySnapshot(
+          startedAt: DateTime.now(),
+          finishedAt: DateTime.now(),
+          observations: []),
       measureAttachments: () async => const AttachmentStorageReport(),
       clearNews: () async {
         clears++;
@@ -36,8 +39,10 @@ void main() {
       },
     )));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Изменить целевой лимит'));
-    await tester.tap(find.text('Изменить целевой лимит'));
+    final limit = find.widgetWithText(OutlinedButton, 'Изменить целевой лимит');
+    await tester.scrollUntilVisible(limit, 170);
+    await tester.pumpAndSettle();
+    await tester.tap(limit);
     await tester.pumpAndSettle();
     allowed = false;
     await tester.tap(find.text('250 МБ'));
@@ -46,7 +51,8 @@ void main() {
 
     allowed = true;
     final clear = find.text('Очистить кэш публичных новостей');
-    await tester.scrollUntilVisible(clear, 400);
+    await tester.scrollUntilVisible(clear, 170);
+    await tester.pumpAndSettle();
     await tester.tap(clear);
     await tester.pumpAndSettle();
     allowed = false;
@@ -97,13 +103,16 @@ void main() {
             measure: () async => result!)));
     await tester.pump();
     expect(find.text('Частичная оценка'), findsOneWidget);
+    expect(find.textContaining('Логический размер'), findsNothing);
+    await tester.scrollUntilVisible(find.text('Дополнительно'), 260);
+    await tester.tap(find.text('Дополнительно'));
+    await tester.pumpAndSettle();
     expect(
         find.text('Логический размер подтверждённой части истории: неизвестно'),
         findsOneWidget);
-    await tester.drag(find.byType(ListView), const Offset(0, -700));
-    await tester.pump();
+    await tester.scrollUntilVisible(
+        find.textContaining('не общий размер'), 240);
     expect(find.textContaining('не общий размер'), findsOneWidget);
-    expect(find.text('Очистить кэш публичных новостей'), findsOneWidget);
   });
 
   testWidgets('attachment sizes display independently and never invoke cleanup',
@@ -121,10 +130,13 @@ void main() {
       },
     )));
     await tester.pump();
+    expect(find.text('Скачанные вложения: 352 Б'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Дополнительно'), 260);
+    await tester.tap(find.text('Дополнительно'));
+    await tester.pumpAndSettle();
     expect(find.text('Рабочие файлы чатов и данные доступа: 1.5 МБ'),
         findsOneWidget);
     expect(find.text('Копии для просмотра: неизвестно'), findsOneWidget);
-    expect(find.text('Скачанные вложения: 352 Б'), findsOneWidget);
     expect(calls, 0);
     busy.complete(InventorySnapshot(
         startedAt: DateTime.now(),

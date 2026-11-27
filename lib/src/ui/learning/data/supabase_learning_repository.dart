@@ -815,7 +815,7 @@ class SupabaseLearningRepository implements LearningRepository {
     safeDebugLog(
         '[saveChat] team=${maskDebugId(teamId)} type=$typeStr replyTo=${maskDebugId(replyTo)} hasAttachment=${attachment != null}');
 
-    String? messageId;
+    final String messageId;
 
     try {
       final result = await _sb.rpc('send_chat_message', params: {
@@ -833,7 +833,18 @@ class SupabaseLearningRepository implements LearningRepository {
       rethrow;
     }
 
-    await _saveChatLocal(teamId, messages);
+    try {
+      await _saveChatLocal(teamId, [
+        ...messages.take(messages.length - 1),
+        last.copyWith(
+          id: messageId,
+          deliveryStatus: MessageDeliveryStatus.sent,
+          clearClientId: true,
+        ),
+      ]);
+    } catch (error) {
+      safeDebugLog('[saveChat] acknowledged message cache failed: ${error.runtimeType}');
+    }
     return messageId;
   }
 

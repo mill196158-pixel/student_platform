@@ -1637,10 +1637,16 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     return DateTime.now().difference(m.at) <= const Duration(hours: 12);
   }
 
+  void _setSelecting(bool value) {
+    if (_selecting == value) return;
+    _chatScroll.keepVisibleMessage(() {
+      setState(() => _selecting = value);
+    });
+  }
+
   void _exitSelection() {
     _selectedIds.clear();
-    if (!_selecting) return;
-    setState(() => _selecting = false);
+    _setSelecting(false);
   }
 
   List<Message> _selectedMessagesFrom(List<Message> list) {
@@ -2321,6 +2327,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
     }
     if (!selectionCurrent() || (_isDm && _currentChatIdDm != fromChatId)) return;
 
+    // Очищаем выбор после подготовки FG-пакета, если он ещё актуален.
+    if (_selectedIds.length == originalSelection.length &&
+        _selectedIds.containsAll(originalSelection)) {
+      _exitSelection();
+    }
     setState(() {
       if (_forwardPreparationGeneration == originalForwardGeneration) {
         _forwardPackageAttached = false;
@@ -2330,11 +2341,6 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         _stagedForward = null;
         _forwardSelectedIds.clear();
         _stagedForwardFileIds.clear();
-      }
-      // Очищаем выбор после подготовки FG-пакета
-      if (_selectedIds.length == originalSelection.length && _selectedIds.containsAll(originalSelection)) {
-        _selecting = false;
-        _selectedIds.clear();
       }
       if (_ctrl.text == originalText) _ctrl.clear();
     });
@@ -2414,16 +2420,9 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
 
     return Scaffold(
       appBar: _selecting
-          ? PreferredSize(
-              preferredSize: const Size.fromHeight(56),
-              child: SafeArea(
-                bottom: false,
-                child: TopSelectionBar(
-                  count: _selectedIds.length,
-                  onClose: _exitSelection,
-                  includeTopInset: false,
-                ),
-              ),
+          ? TopSelectionBar(
+              count: _selectedIds.length,
+              onClose: _exitSelection,
             )
           : AppBar(
               title: (isDm)
@@ -2583,12 +2582,11 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                           selectedMessageIds: _selectedIds,
                           onToggleSelect: (id) {
                             setState(() {
-                              if (_selectedIds.contains(id))
-                                _selectedIds.remove(id);
-                              else
+                              if (!_selectedIds.remove(id)) {
                                 _selectedIds.add(id);
-                              if (_selectedIds.isEmpty) _selecting = false;
+                              }
                             });
+                            if (_selectedIds.isEmpty) _exitSelection();
                           },
                           // В ЛС аватары не показываем принципиально
                           forceHideAvatars: widget.hideAvatars || isDm,
@@ -3230,7 +3228,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         onReact: (emoji) => widget.service.toggleReaction(m.id, emoji),
         onSelect: () {
           _selectedIds.add(m.id);
-          setState(() => _selecting = true);
+          _setSelecting(true);
         },
       );
     } finally {
@@ -3270,7 +3268,7 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
         break;
       case 'Выбрать':
         _selectedIds.add(m.id);
-        setState(() => _selecting = true);
+        _setSelecting(true);
         break;
     }
   }

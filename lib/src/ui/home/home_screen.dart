@@ -30,6 +30,7 @@ import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_acti
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 import 'package:student_platform/src/ui/profile/profile_avatar_image.dart';
+import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen(
@@ -412,9 +413,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return work;
   }
 
+  Future<void> _showSavedHeader(CachedHomeScheduleReader reader) async {
+    try {
+      final profile = await reader.readProfile();
+      if (profile == null || !mounted || _data != null ||
+          !identical(widget.cachedReader, reader) || !reader.canRead) return;
+      setState(() => _data = HomeDashboardData(
+        profile: profile,
+        scheduleDate: MskDate.today(),
+        todayLessons: const [],
+        assignments: const [],
+        news: const [],
+        scheduleStatus: 'Открываем сохранённое расписание…',
+        assignmentsStatus: 'Открываем сохранённые задания…',
+      ));
+    } catch (_) {
+      // Optional early frame: the full cached dashboard owns error feedback.
+    }
+  }
+
   Future<void> _loadDashboard() async {
     final reader = widget.cachedReader;
     if (reader != null) {
+      final firstCoreFrame = _data == null;
+      if (firstCoreFrame) unawaited(_showSavedHeader(reader));
       try {
         final snapshot = await reader.readDashboard();
         final content = widget.homeContent;
@@ -452,6 +474,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         }
 
+        if (!currentContext()) return;
+        // The saved schedule/profile is usable while optional media settles.
+        // Keep the prior frame during refresh so the feed does not collapse.
+        if (firstCoreFrame) {
+          setState(() {
+            _data = snapshot;
+            _loading = false;
+            _error = null;
+          });
+        }
         final optional = await Future.wait([readOptional('news'), readOptional('promo')]);
         final savedNews = optional[0];
         final savedPromo = optional[1];
@@ -1155,25 +1187,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final content = widget.homeContent;
     final contentCaps = widget.homeContentCapabilities;
     final contentPermit = _contentPermit;
-    List<HomeNewsItem> checked;
-    try {
-      checked = await service.validateNewsImages(news).timeout(const Duration(seconds: 1));
-    } catch (_) {
-      checked = news.map((item) => item.copyWith(clearImageBytes: true)).toList();
-    }
-    if (!mounted ||
-        !identical(_service, service) ||
-        service.currentUserId != userId ||
-        !identical(widget.cachedReader, reader) ||
-        !identical(widget.onlineBarrier, barrier) ||
-        !identical(widget.homeContent, content) ||
-        !identical(widget.homeContentCapabilities, contentCaps) ||
-        (reader != null && (!identical(_contentPermit, contentPermit) || !_cachedContentAllowed || !reader.canRead)) ||
-        (barrier != null && !barrier.isOpen) ||
-        (scope != null && (owner == null || !scope.isCurrent(owner))) ||
-        content?.isDenied('news') == true) return;
-    final byId = {for (final item in checked) item.id: item};
-    final presentation = _presentationNews(checked);
+    final byId = {for (final item in news) item.id: item};
+    // Each page checks its own image. The rest of the carousel cannot delay
+    // the tap or restore copies the user has already removed.
+    final presentation = _presentationNews(
+        news.map((item) => item.copyWith(clearImageBytes: true)).toList());
     final safeIndex = initialIndex.clamp(0, presentation.length - 1);
     final active = ValueNotifier<bool>(true);
     final navigator = Navigator.of(context);
@@ -1236,18 +1254,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               initialIndex: safeIndex,
               onPageChanged: reader == null ? (id) => mark(id) : null,
               onClosed: reader == null ? (id) => mark(id, closed: true) : null,
-              // The legacy resolver uses internal timeouts and cannot prove
-              // its underlying HTTP work has settled when a barrier drains.
-              resolveImage: reader == null && barrier == null
-                  ? (item) async {
-                      if (!current()) return null;
-                      final source = byId[item.id];
-                      if (source == null) return item.imageBytes;
-                      final bytes =
-                          await service.resolveNewsImageBytes(source);
-                      return current() ? bytes : null;
-                    }
-                  : null,
+              resolveImage: (item) async {
+                if (!current()) return null;
+                final source = byId[item.id];
+                if (source == null) return null;
+                final validated = await service
+                    .validateNewsImages([source])
+                    .timeout(const Duration(seconds: 1), onTimeout: () => []);
+                if (!current()) return null;
+                final bytes = validated.firstOrNull?.imageBytes;
+                if (bytes != null || reader != null) return bytes;
+                final downloaded = barrier == null
+                    ? await service.resolveNewsImageBytes(source)
+                    : await service.resolveGuardedStoryImage(source, barrier,
+                        current: current);
+                return current() ? downloaded : null;
+              },
             );
         final changes = <Listenable>[
           active,
@@ -1771,9 +1793,20 @@ class _LoadingDashboard extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
       children: const [
-        _SkeletonLine(width: 180, height: 28),
-        SizedBox(height: 10),
-        _SkeletonLine(width: 240, height: 18),
+        Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.all(Radius.circular(16)),
+              child: Image(
+                image: AssetImage('assets/icons/launcher_icon.png'),
+                width: 56,
+                height: 56,
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(child: Text('Подготавливаем главную…')),
+          ],
+        ),
         SizedBox(height: 18),
         _SkeletonBlock(height: 128, radius: 26),
         SizedBox(height: 22),
@@ -1834,21 +1867,6 @@ class _SkeletonBlock extends StatelessWidget {
     return _SkeletonBase(
       radius: radius,
       child: SizedBox(height: height, width: double.infinity),
-    );
-  }
-}
-
-class _SkeletonLine extends StatelessWidget {
-  const _SkeletonLine({required this.width, required this.height});
-
-  final double width;
-  final double height;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SkeletonBase(
-      radius: height / 2,
-      child: SizedBox(width: width, height: height),
     );
   }
 }

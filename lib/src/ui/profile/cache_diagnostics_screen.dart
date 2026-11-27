@@ -27,6 +27,7 @@ class CacheDiagnosticsScreen extends StatefulWidget {
   final Future<AttachmentStorageReport> Function()? measureAttachments;
   @visibleForTesting
   final Future<PublicNewsClearResult> Function()? clearNews;
+
   /// Rechecks the original offline route permit before dispatching an action.
   final bool Function()? canAccess;
   @visibleForTesting
@@ -152,56 +153,39 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
     if (!_accessible) return;
     final revision = ++_revision;
     if (_historyCapabilities != null) _startHistory();
-    setState(() {
-      _loading = true;
-      _snapshot = null;
-      _budgetObserved = null;
-      _attachments = null;
-    });
-    unawaited(_measureAttachments(revision));
-    InventorySnapshot? result;
-    try {
-      final budget = widget.budget ??
-          (widget.measure == null ? OptionalImageCacheBudget.instance : null);
-      final budgetFuture = budget == null
-          ? null
-          : Future.wait<void>([
-              budget.waitForPolicy(),
-              budget.refreshForDisplay(),
-            ]);
-      result = await (widget.measure?.call() ??
-              CacheInventoryCollector.shared.collect())
-          .timeout(widget.timeout);
-      if (budgetFuture != null) {
-        try {
-          await budgetFuture.timeout(widget.timeout);
-        } catch (_) {}
-        if (mounted && revision == _revision) {
-          _budgetObserved = budget!.observedBytes;
-          _budgetReserved = budget.reservedBytes;
-        }
+    setState(() => _loading = true);
+    final budget = widget.budget ??
+        (widget.measure == null ? OptionalImageCacheBudget.instance : null);
+    unawaited(_measurePart(widget.measureAttachments ??
+            AttachmentStorageInventory.shared.collect)
+        .then((value) {
+      if (_accessible && revision == _revision) {
+        setState(() => _attachments = value);
       }
-    } catch (_) {
-      result = null;
-    }
-    if (!mounted || revision != _revision) return;
+    }));
+    final (snapshot, budgetReady) = await (
+      _measurePart(widget.measure ?? CacheInventoryCollector.shared.collect),
+      _measurePart(() async {
+        if (budget == null) return false;
+        await Future.wait<void>(
+            [budget.waitForPolicy(), budget.refreshForDisplay()]);
+        return true;
+      }),
+    ).wait;
+    if (!_accessible || revision != _revision) return;
     setState(() {
-      _snapshot = result;
+      _snapshot = snapshot;
+      _budgetObserved = budgetReady == true ? budget?.observedBytes : null;
+      _budgetReserved = budgetReady == true ? budget!.reservedBytes : 0;
       _loading = false;
     });
   }
 
-  Future<void> _measureAttachments(int revision) async {
-    AttachmentStorageReport report;
+  Future<T?> _measurePart<T>(Future<T> Function() measure) async {
     try {
-      final measure = widget.measureAttachments ??
-          AttachmentStorageInventory.shared.collect;
-      report = await measure().timeout(widget.timeout);
+      return await measure().timeout(widget.timeout);
     } catch (_) {
-      report = const AttachmentStorageReport();
-    }
-    if (mounted && revision == _revision) {
-      setState(() => _attachments = report);
+      return null;
     }
   }
 
@@ -221,7 +205,7 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
         builder: (context) => AlertDialog(
           title: const Text('Удалить копии изображений новостей?'),
           content: const Text(
-              'Изображения из текущего кэша публичных новостей придётся загрузить снова. Старый кэш новостей, материалы, вложения чатов и черновики сохранятся.'),
+              'Удалятся только временные копии изображений из текущих публичных новостей. При следующем открытии новости загрузят их из интернета.'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context, false),
@@ -258,7 +242,7 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
   }
 
   Future<void> _chooseLimit(OptionalImageCacheBudget budget) async {
-    if (!_accessible) return;
+    if (!_accessible || _changing) return;
     final choice = await showDialog<int>(
         context: context,
         builder: (context) => SimpleDialog(
@@ -298,77 +282,213 @@ class _CacheDiagnosticsScreenState extends State<CacheDiagnosticsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final snapshot = _snapshot;
+    final attachments = _attachments;
     final budget = widget.budget ?? OptionalImageCacheBudget.instance;
+    final showBudget = widget.measure == null || widget.budget != null;
+    final largeText = MediaQuery.textScalerOf(context).scale(16) > 20;
     return Scaffold(
-      appBar: AppBar(title: const Text('Данные приложения')),
-      body: ListView(padding: const EdgeInsets.all(20), children: [
-        const Text('Частичная оценка',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 12),
-        if (widget.measure == null || widget.budget != null) ...[
-          Text(
-              'Учтённые копии новостей и материалов: ${_value(_budgetObserved)}'),
-          Text(
-              'Резерв активных записей: ${_value(_budgetObserved == null ? null : _budgetReserved)}'),
-          Text(budget.policyReady
-              ? 'Целевой лимит учтённого серверного кэша — ${_value(budget.limitBytes)}, включая служебный запас ${_value(budget.serviceReserveBytes)}.'
-              : 'Целевой лимит учтённого серверного кэша сейчас недоступен.'),
-          const Text(
-              'Учитываются копии изображений новостей и материалов и часть подтверждённой истории чатов. При превышении лимита старая подтверждённая история может очищаться в фоне при подключении к сети и доступности необходимых проверок. Черновики, неотправленные данные и сохранённые офлайн файлы не входят в эту очистку; остальные данные охвачены не полностью.'),
-          OutlinedButton(
-              onPressed: _loading || _changing || budget.policyBusy
-                  ? null
-                  : () => _chooseLimit(budget),
-              child: const Text('Изменить целевой лимит')),
-          const SizedBox(height: 12),
-        ],
-        if (_loading)
-          const Text('Подсчёт…')
-        else if (snapshot == null)
-          const Text('Сейчас недоступно')
-        else ...[
-          for (final item in snapshot.observations)
-            Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text('${_label(item.name)}: ${_value(item.bytes)}')),
-          ValueListenableBuilder<int?>(
-              valueListenable: _logicalHistory,
-              builder: (_, value, __) => Text(
-                  'Логический размер подтверждённой части истории: ${_value(value)}')),
-        ],
-        const SizedBox(height: 12),
-        const Text(
-            'Оценки отдельных путей приблизительны и могут включать общие или защищённые данные. Не все хранилища обследованы; одинаковые физические файлы могут быть учтены повторно.'),
-        const SizedBox(height: 12),
-        const Text(
-            'Логический размер истории не равен физическому месту. Это не общий размер и не объём, доступный для очистки. Черновики, неотправленные сообщения и сохранённые офлайн файлы могут учитываться не полностью.'),
-        const SizedBox(height: 12),
-        Text('Вложения чатов на устройстве',
-            style: Theme.of(context).textTheme.titleMedium),
-        const Text(
-            'Приблизительный объём для всех аккаунтов на этом устройстве. Вложения учитываются отдельно от целевого лимита.'),
-        if (_attachments == null)
-          const Text('Подсчёт вложений…')
-        else ...[
-          Text(
-              'Рабочие файлы чатов и данные доступа: ${_value(_attachments!.authorizedFilesBytes)}'),
-          Text(
-              'Копии для просмотра: ${_value(_attachments!.viewerFilesBytes)}'),
-          Text(
-              'Скачанные вложения: ${_value(_attachments!.downloadedFilesBytes)}'),
-        ],
-        const SizedBox(height: 16),
-        OutlinedButton(
-            onPressed: _clearPending ? null : _confirmClearNews,
-            child: const Text('Очистить кэш публичных новостей')),
-        if (_clearMessage != null)
-          Semantics(liveRegion: true, child: Text(_clearMessage!)),
-        const SizedBox(height: 16),
-        OutlinedButton(
-            onPressed: _loading ? null : _measure,
-            child: const Text('Обновить')),
-      ]),
+      appBar: AppBar(
+        title: const Text('Данные приложения'),
+        toolbarHeight: largeText ? 76 : kToolbarHeight,
+      ),
+      body: SafeArea(
+          top: false,
+          child: LayoutBuilder(builder: (context, constraints) {
+            final gutter = constraints.maxWidth > 592
+                ? (constraints.maxWidth - 560) / 2
+                : 16.0;
+            return ListView(
+              padding: EdgeInsets.fromLTRB(gutter, 4, gutter, 24),
+              children: [
+                _StorageSection(
+                  icon: Icons.storage_outlined,
+                  title: 'Место на устройстве',
+                  color: colors.primaryContainer,
+                  children: [
+                    if (showBudget) ...[
+                      Text(
+                          _budgetObserved == null
+                              ? 'Нет оценки'
+                              : _value(_budgetObserved),
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                              color: colors.onPrimaryContainer,
+                              fontWeight: FontWeight.w700)),
+                      const Text('Учтённые копии новостей и материалов'),
+                      const SizedBox(height: 6),
+                    ],
+                    Text('Частичная оценка',
+                        style: theme.textTheme.labelLarge
+                            ?.copyWith(color: colors.onPrimaryContainer)),
+                    const Text(
+                        'Полный объём приложения доступен в настройках устройства.'),
+                    if (_loading) ...[
+                      const SizedBox(height: 8),
+                      const Text('Подсчёт…'),
+                    ] else if (snapshot == null) ...[
+                      const SizedBox(height: 8),
+                      const Text('Сейчас недоступно'),
+                    ],
+                  ],
+                ),
+                if (showBudget) ...[
+                  const SizedBox(height: 12),
+                  _StorageSection(
+                    icon: Icons.tune_outlined,
+                    title: 'Лимит кэша',
+                    children: [
+                      Text(budget.policyReady
+                          ? 'Целевой лимит — ${_value(budget.limitBytes)}'
+                          : 'Целевой лимит сейчас недоступен.'),
+                      const Text(
+                          'Лимит охватывает копии новостей и материалов и часть подтверждённой истории чатов.'),
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: _loading ||
+                                _changing ||
+                                budget.policyBusy ||
+                                !_accessible
+                            ? null
+                            : () => _chooseLimit(budget),
+                        child: const Text('Изменить целевой лимит',
+                            textAlign: TextAlign.center),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 12),
+                _StorageSection(
+                  icon: Icons.attach_file,
+                  title: 'Вложения чатов на устройстве',
+                  children: [
+                    Text(
+                        'Скачанные вложения: ${_value(attachments?.downloadedFilesBytes)}'),
+                    const Text(
+                        'Оценка для всех аккаунтов на устройстве. Учитывается отдельно от лимита кэша.'),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _StorageSection(
+                  icon: Icons.cleaning_services_outlined,
+                  title: 'Очистка кэша',
+                  children: [
+                    const Text(
+                        'Можно освободить место, удалив временные копии изображений из текущих публичных новостей.'),
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: _clearPending || !_accessible
+                          ? null
+                          : _confirmClearNews,
+                      child: const Text('Очистить кэш публичных новостей',
+                          textAlign: TextAlign.center),
+                    ),
+                    if (_clearMessage != null)
+                      Semantics(liveRegion: true, child: Text(_clearMessage!)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                      color: colors.surface,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: colors.outlineVariant)),
+                  child: ExpansionTile(
+                    shape: const Border(),
+                    collapsedShape: const Border(),
+                    title: const Text('Дополнительно'),
+                    subtitle:
+                        const Text('История чатов, оценки и служебные файлы'),
+                    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (showBudget) ...[
+                        Text(
+                            'Резерв активных записей: ${_value(_budgetObserved == null ? null : _budgetReserved)}'),
+                        if (budget.policyReady)
+                          Text(
+                              'Служебный запас включён в лимит: ${_value(budget.serviceReserveBytes)}'),
+                        const SizedBox(height: 8),
+                        const Text(
+                            'При превышении лимита старая подтверждённая история чатов может очищаться в фоне при подключении к сети и доступности проверок. Черновики, неотправленные данные и сохранённые офлайн-файлы защищены от этой очистки.'),
+                        const SizedBox(height: 12),
+                      ],
+                      for (final item in snapshot?.observations ??
+                          const <InventoryObservation>[])
+                        Text('${_label(item.name)}: ${_value(item.bytes)}'),
+                      ValueListenableBuilder<int?>(
+                        valueListenable: _logicalHistory,
+                        builder: (_, value, __) => Text(
+                            'Логический размер подтверждённой части истории: ${_value(value)}'),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                          'Это не общий размер истории на диске и не объём, доступный для очистки. Некоторые общие или защищённые файлы могут учитываться повторно.'),
+                      const SizedBox(height: 12),
+                      Text(
+                          'Рабочие файлы чатов и данные доступа: ${_value(attachments?.authorizedFilesBytes)}'),
+                      Text(
+                          'Копии для просмотра: ${_value(attachments?.viewerFilesBytes)}'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: _loading || !_accessible ? null : _measure,
+                  child: const Text('Обновить'),
+                ),
+              ],
+            );
+          })),
+    );
+  }
+}
+
+class _StorageSection extends StatelessWidget {
+  const _StorageSection(
+      {required this.icon,
+      required this.title,
+      required this.children,
+      this.color});
+
+  final IconData icon;
+  final String title;
+  final List<Widget> children;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final foreground =
+        color == null ? colors.onSurface : colors.onPrimaryContainer;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color ?? colors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: color == null ? Border.all(color: colors.outlineVariant) : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: DefaultTextStyle.merge(
+          style: theme.textTheme.bodyMedium?.copyWith(color: foreground),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(icon,
+                  color: color == null ? colors.primary : foreground, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                  child: Text(title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                          color: foreground, fontWeight: FontWeight.w700))),
+            ]),
+            const SizedBox(height: 8),
+            ...children,
+          ]),
+        ),
+      ),
     );
   }
 }
