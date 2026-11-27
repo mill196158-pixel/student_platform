@@ -17,6 +17,9 @@ from qa_local_schema_suite import ROOT, run_suite
 
 
 def main():
+    if sys.argv[1:] not in ([], ["--water"]):
+        raise SystemExit("Usage: qa_local_project_chat.py [--water]")
+    water_chat_cases = sys.argv[1:] == ["--water"]
     with TemporaryDirectory(prefix="project-sheets-", dir=ROOT / "build") as tmp:
         folder = Path(tmp)
         for name in ("project", "control"):
@@ -33,19 +36,37 @@ def main():
                               "off_project", "off_control", "team_project", "team_control",
                               "chat_project", "chat_control", "file_project", "file_control",
                               "curriculum_empty", "off_empty", "team_empty", "chat_empty")
+                    if water_chat_cases:
+                        fields += ("link_to_project", "link_to_control")
                     ids = {key: str(uuid4()) for key in fields}
                     template = (ROOT / "scripts/qa_project_chat_fixture.sql").read_text("utf-8")
                     migration = (ROOT / "supabase/migrations/20260825202929_academic_plan_import_persistence.sql").read_text("utf-8")
                     start = migration.index("create or replace function private.academic_assessment_types_canonical(")
                     end = migration.index("create or replace function private.academic_workload_is_valid", start)
                     template = migration[start:end].replace("private.", schema + ".") + template
+                    if water_chat_cases:
+                        template += (ROOT / "scripts/qa_water_chat_fixture.sql").read_text("utf-8")
+                        chat_cta = (ROOT / "supabase/migrations/20260731113816_stage14_2_3_home_promo_schema3_chat_cta.sql").read_text("utf-8")
+                        start = chat_cta.index("create or replace function public.content_resolve_chat_cta(")
+                        end = chat_cta.index("comment on function public.content_resolve_chat_cta", start)
+                        template += chat_cta[start:end].replace("public.", schema + ".")
                     params = dict(ids, student=accounts[0], login=schema,
                                   base=f"http://127.0.0.1:{server.server_port}", schema=schema)
                     for key, value in params.items():
                         template = template.replace(":" + key + ":", value)
                     digest = hashlib.sha256((folder / "project.pdf").read_bytes()).hexdigest()
-                    return template, dict(ids, pdfHash=digest)
+                    return template, dict(ids, pdfHash=digest, water=water_chat_cases)
 
+                if water_chat_cases:
+                    cases = tuple(
+                        f"PASS water chat {course} via {path}"
+                        for course in ("reliability", "modeling")
+                        for path in ("learning-menu", "materials", "inbox", "message-link")
+                    )
+                    return run_suite("waterchat", setup,
+                                     "integration_test/ordinary_project_chat_local_test.dart",
+                                     "STUDENT_PROJECT_CHAT_LOCAL",
+                                     required_markers=cases + ("PASS water chat denied link and read-only",))
                 return run_suite("projectchat", setup,
                                  "integration_test/ordinary_project_chat_local_test.dart",
                                  "STUDENT_PROJECT_CHAT_LOCAL", required_markers=(

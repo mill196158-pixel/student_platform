@@ -130,6 +130,26 @@ class _DelayedStoryDashboard extends _OnlineDashboard {
   }
 }
 
+class _ProgressiveDashboard extends _OnlineDashboard {
+  final arrived = Completer<void>();
+
+  @override
+  Future<HomeDashboardData> load({
+    void Function(HomeDashboardData)? onUpdate,
+    HomeDashboardData? previous,
+  }) async {
+    onUpdate?.call(HomeDashboardData(
+      profile: data.profile,
+      scheduleDate: data.scheduleDate,
+      todayLessons: data.todayLessons,
+      assignments: data.assignments,
+      news: const [],
+    ));
+    await arrived.future;
+    return data;
+  }
+}
+
 class _RefreshDashboard extends _Dashboard {
   _RefreshDashboard(this.first);
   final HomeNewsItem first;
@@ -218,6 +238,41 @@ class _DisposeActionState extends State<_DisposeAction> {
 }
 
 void main() {
+  testWidgets('online late news keeps the summary fixed and returns to its slot on tab entry',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final dashboard = _ProgressiveDashboard()..markGate.complete();
+    final active = ValueNotifier(true);
+    addTearDown(active.dispose);
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(
+      dashboardService: dashboard,
+      promoService: _Promo(),
+      notificationsApi: _Notifications(),
+      activeListenable: active,
+    )));
+    await tester.pumpAndSettle();
+    final summary = find.text('Сводка дня');
+    final assignments = find.text('Ближайшие дела');
+    final before = [tester.getTopLeft(summary), tester.getTopLeft(assignments)];
+    final headline = find.text('Online news');
+    expect(headline, findsNothing);
+    dashboard.arrived.complete();
+    await tester.pumpAndSettle();
+    expect([tester.getTopLeft(summary), tester.getTopLeft(assignments)], before);
+    expect(tester.getTopLeft(headline).dy,
+        greaterThan(tester.getTopLeft(assignments).dy));
+    active.value = false;
+    await tester.pump();
+    active.value = true;
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(headline).dy,
+        lessThan(tester.getTopLeft(summary).dy));
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('news cover arrives in the already open protected reader',
       (tester) async {
     final dashboard = _DelayedStoryDashboard()..markGate.complete();
@@ -482,13 +537,24 @@ void main() {
     caps.dispose(); scope.dispose(); await events.close();
   });
   testWidgets('stalled optional content does not block offline home', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
     final events = StreamController<AuthState>.broadcast(sync: true);
     final session = fakeSession('qa-stalled');
     final scope = AuthSessionScope(currentSession: () => session, authEvents: events.stream);
     events.add(AuthState(AuthChangeEvent.initialSession, session));
     final caps = SessionCapabilities(scope);
     expect(caps.grant(SessionCapabilityMode.cacheOnly, caps.beginAuthorization(scope.capture()!)!), isTrue);
-    final content = _Content(const HomeContentSnapshot([], {}), const HomeContentSnapshot([], {}))..stall = true;
+    final content = _Content(const HomeContentSnapshot([
+      {
+        'id': 'late',
+        'title': 'Сохранённая новость после ожидания',
+        'body': 'Текст',
+        'created_at': '2026-11-06T00:00:00Z',
+      }
+    ], {}), const HomeContentSnapshot([], {}))..stall = true;
     await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: _Dashboard(),
         cachedReader: _Reader(caps), homeContent: content, homeContentCapabilities: caps)));
     await tester.pump();
@@ -496,9 +562,16 @@ void main() {
     await tester.pump();
     expect(find.textContaining('QA'), findsWidgets);
     expect(find.text('Не удалось загрузить главную'), findsNothing);
-    caps.block();
+    final summary = find.text('Сводка дня');
+    final assignments = find.text('Ближайшие дела');
+    final before = [tester.getTopLeft(summary), tester.getTopLeft(assignments)];
+    final article = find.text('Сохранённая новость после ожидания');
+    expect(article, findsNothing);
     content.stalled.complete();
-    await tester.pump();
+    await tester.pumpAndSettle();
+    expect([tester.getTopLeft(summary), tester.getTopLeft(assignments)], before);
+    expect(tester.getTopLeft(article).dy,
+        greaterThan(tester.getTopLeft(assignments).dy));
     await tester.pumpWidget(const SizedBox());
     caps.dispose(); scope.dispose(); await events.close();
   });
@@ -653,7 +726,11 @@ void main() {
         tester.widgetList(find.byType(ModalBarrier)).length, initialBarriers);
     content.allow('news');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Локальная новость').first);
+    final restoredNews = find.text('Локальная новость').first;
+    await tester.ensureVisible(restoredNews);
+    await tester.pumpAndSettle();
+    expect(restoredNews.hitTestable(), findsOneWidget);
+    await tester.tap(restoredNews);
     await tester.pumpAndSettle();
     expect(find.text('Сохранённый текст новости'), findsWidgets);
     caps.block();

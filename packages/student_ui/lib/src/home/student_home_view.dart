@@ -69,6 +69,7 @@ class StudentHomeView extends StatelessWidget {
     this.selectedNewsId,
     this.adminNewsHighlightColor,
     this.bottomNavigationBar,
+    this.contentLayoutVisit,
     super.key,
   });
 
@@ -104,6 +105,10 @@ class StudentHomeView extends StatelessWidget {
   final Color? adminNewsHighlightColor;
   final Widget? bottomNavigationBar;
 
+  /// Keeps late sections below the content already shown on the current Home
+  /// visit. A new visit adopts the configured placement of all ready content.
+  final int? contentLayoutVisit;
+
   List<StudentHomePromoPlacement> _resolvedPlacements() {
     if (homePromoPlacements.isNotEmpty) return homePromoPlacements;
     if (hideHomePromo) return const [];
@@ -118,36 +123,66 @@ class StudentHomeView extends StatelessWidget {
     ];
   }
 
-  List<Widget> _promoSliversFor(String slot) {
-    final cards = _resolvedPlacements()
-        .where((p) =>
-            p.slot == slot || (p.slot.isEmpty && slot == 'after_assignments'))
-        .toList();
-    if (cards.isEmpty) return const [];
-    return [
-      for (var i = 0; i < cards.length; i++) ...[
-        SliverToBoxAdapter(
-          child: KeyedSubtree(
-            key: cards[i].anchorKey,
-            child: StudentHomePromoCard(
-              payload: cards[i].payload,
-              onTap: cards[i].onTap ?? onHelpTap,
-              onDismiss: cards[i].onDismiss ?? onHomePromoDismiss,
-              showDemoBadge: cards[i].showDemoBadge,
-              imageBytes: cards[i].imageBytes,
-              imageLoading: cards[i].imageLoading,
-              imageState: cards[i].imageState,
-              iconBytes: cards[i].iconBytes,
-            ),
-          ),
+  Iterable<Widget> _promoSlivers(StudentHomePromoPlacement card) sync* {
+    yield SliverToBoxAdapter(
+      child: KeyedSubtree(
+        key: card.anchorKey,
+        child: StudentHomePromoCard(
+          payload: card.payload,
+          onTap: card.onTap ?? onHelpTap,
+          onDismiss: card.onDismiss ?? onHomePromoDismiss,
+          showDemoBadge: card.showDemoBadge,
+          imageBytes: card.imageBytes,
+          imageLoading: card.imageLoading,
+          imageState: card.imageState,
+          iconBytes: card.iconBytes,
         ),
-        _sectionSpacer,
-      ],
-    ];
+      ),
+    );
+    yield _sectionSpacer;
+  }
+
+  Iterable<Widget> _newsSlivers() sync* {
+    if (data.news.isEmpty) return;
+    yield SliverToBoxAdapter(
+      key: const ValueKey('student-home-news'),
+      child: _AnimatedEntry(
+        delay: const Duration(milliseconds: 20),
+        child: StudentHomeNewsFeed(
+          news: data.news,
+          onNewsTap: onNewsTap,
+          selectedNewsId: selectedNewsId,
+          adminHighlightColor: adminNewsHighlightColor,
+        ),
+      ),
+    );
+    yield _sectionSpacer;
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => contentLayoutVisit == null
+      ? _buildView(context, placements: _resolvedPlacements())
+      : _StudentHomeVisit(view: this);
+
+  Widget _buildView(
+    BuildContext context, {
+    required List<StudentHomePromoPlacement> placements,
+    Map<Object, String>? configuredSlots,
+    bool newsInConfiguredSlot = true,
+    List<Widget> appendedSections = const [],
+  }) {
+    Iterable<Widget> promosFor(String slot) sync* {
+      for (final card in placements) {
+        final effectiveSlot = configuredSlots == null
+            ? card.slot
+            : configuredSlots[_placementIdentity(card)];
+        if (effectiveSlot == slot ||
+            (effectiveSlot == '' && slot == 'after_assignments')) {
+          yield* _promoSlivers(card);
+        }
+      }
+    }
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final scrollView = CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -162,24 +197,11 @@ class StudentHomeView extends StatelessWidget {
           ),
         ),
         _sectionSpacer,
-        // System block: news (immovable).
-        if (data.news.isNotEmpty) ...[
-          SliverToBoxAdapter(
-            child: _AnimatedEntry(
-              delay: const Duration(milliseconds: 20),
-              child: StudentHomeNewsFeed(
-                news: data.news,
-                onNewsTap: onNewsTap,
-                selectedNewsId: selectedNewsId,
-                adminHighlightColor: adminNewsHighlightColor,
-              ),
-            ),
-          ),
-          _sectionSpacer,
-        ],
-        ..._promoSliversFor('after_news'),
+        if (newsInConfiguredSlot) ..._newsSlivers(),
+        ...promosFor('after_news'),
         // System block: day summary (immovable).
         SliverToBoxAdapter(
+          key: const ValueKey('student-home-summary'),
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 70),
             child: _TodaySummaryCard(
@@ -187,9 +209,10 @@ class StudentHomeView extends StatelessWidget {
           ),
         ),
         _sectionSpacer,
-        ..._promoSliversFor('after_day_summary'),
+        ...promosFor('after_day_summary'),
         // System block: assignments (immovable).
         SliverToBoxAdapter(
+          key: const ValueKey('student-home-assignments'),
           child: _AnimatedEntry(
             delay: const Duration(milliseconds: 120),
             child: _AssignmentsSection(
@@ -205,9 +228,10 @@ class StudentHomeView extends StatelessWidget {
           ),
         ),
         _sectionSpacer,
-        ..._promoSliversFor('after_assignments'),
-        ..._promoSliversFor('before_bottom_info'),
-        ..._promoSliversFor('end_of_page'),
+        ...promosFor('after_assignments'),
+        ...promosFor('before_bottom_info'),
+        ...promosFor('end_of_page'),
+        ...appendedSections,
         const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
     );
@@ -227,6 +251,91 @@ class StudentHomeView extends StatelessWidget {
               : RefreshIndicator(onRefresh: onRefresh!, child: scrollView),
         ),
       ),
+    );
+  }
+}
+
+Object _placementIdentity(StudentHomePromoPlacement card) =>
+    card.anchorKey ?? card.payload;
+
+class _StudentHomeVisit extends StatefulWidget {
+  const _StudentHomeVisit({required this.view});
+
+  final StudentHomeView view;
+
+  @override
+  State<_StudentHomeVisit> createState() => _StudentHomeVisitState();
+}
+
+class _StudentHomeVisitState extends State<_StudentHomeVisit> {
+  static const _newsSection = Object();
+  final _configuredSlots = <Object, String>{};
+  final _appendedOrder = <Object>{};
+  bool _newsInConfiguredSlot = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _adoptCurrentLayout();
+  }
+
+  void _adoptCurrentLayout() {
+    final view = widget.view;
+    _newsInConfiguredSlot = view.data.news.isNotEmpty;
+    _configuredSlots
+      ..clear()
+      ..addEntries(view
+          ._resolvedPlacements()
+          .map((card) => MapEntry(_placementIdentity(card), card.slot)));
+    _appendedOrder.clear();
+  }
+
+  @override
+  void didUpdateWidget(covariant _StudentHomeVisit oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final view = widget.view;
+    if (view.contentLayoutVisit != oldWidget.view.contentLayoutVisit) {
+      _adoptCurrentLayout();
+      return;
+    }
+
+    final visiblePromos =
+        view._resolvedPlacements().map(_placementIdentity).toSet();
+    _configuredSlots.removeWhere((id, _) => !visiblePromos.contains(id));
+    _appendedOrder.removeWhere((id) => id == _newsSection
+        ? view.data.news.isEmpty
+        : !visiblePromos.contains(id));
+    if (view.data.news.isEmpty) {
+      _newsInConfiguredSlot = false;
+    } else if (!_newsInConfiguredSlot) {
+      _appendedOrder.add(_newsSection);
+    }
+    _appendedOrder
+        .addAll(visiblePromos.where((id) => !_configuredSlots.containsKey(id)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final view = widget.view;
+    final placements = view._resolvedPlacements();
+    final byIdentity = {
+      for (final card in placements) _placementIdentity(card): card,
+    };
+    return view._buildView(
+      context,
+      placements: [
+        for (final id in _configuredSlots.keys)
+          if (byIdentity[id] case final card?) card,
+      ],
+      configuredSlots: _configuredSlots,
+      newsInConfiguredSlot: _newsInConfiguredSlot,
+      appendedSections: [
+        for (final section in _appendedOrder)
+          if (section == _newsSection)
+            ...view._newsSlivers()
+          else if (byIdentity[section] case final card?)
+            ...view._promoSlivers(card),
+      ],
     );
   }
 }

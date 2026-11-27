@@ -84,7 +84,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   (String, String, String, int)? _badgeBinding;
   int _promoLoadGeneration = 0;
   int _modeRevision = 0;
+  int _contentLayoutVisit = 0;
   int _promoMediaGeneration = 0;
+  final Set<String> _shownPromosThisVisit = {};
   final Set<String> _recordedImpressionIds = {};
   final Map<String, GlobalKey> _promoKeys = {};
   bool _impressionFramePending = false;
@@ -107,13 +109,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    widget.activeListenable?.addListener(_queuePromoImpressions);
+    widget.activeListenable?.addListener(_onHomeActiveChanged);
     widget.homeContent?.addListener(_onContentAccessChanged);
     _bindContentCapabilities();
     CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)?.addListener(_onCachedReadReady);
     if (widget.cachedReader == null) {
       _inAppSub = InAppNotificationBus.instance.stream.listen(_onInAppEvent);
     }
+  }
+
+  void _onHomeActiveChanged() {
+    if (widget.activeListenable?.value == true && mounted) {
+      setState(_beginContentLayoutVisit);
+    }
+    _queuePromoImpressions();
+  }
+
+  Future<void> _refreshFromGesture() {
+    setState(_beginContentLayoutVisit);
+    return _load();
+  }
+
+  void _beginContentLayoutVisit() {
+    _contentLayoutVisit++;
+    _shownPromosThisVisit.clear();
   }
 
   void _onContentAccessChanged() {
@@ -204,6 +223,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _loadUserId = null;
       _loadAuthScope = null;
       _promoLoadGeneration++;
+      _beginContentLayoutVisit();
     }
     _authScope = source;
     _authScope?.addListener(_onAuthScopeChanged);
@@ -245,6 +265,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _loadAuthScope = null;
         _loadInFlight = null;
         _promoLoadGeneration++;
+        _beginContentLayoutVisit();
       });
       return;
     }
@@ -254,6 +275,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.activeListenable, widget.activeListenable)) {
+      oldWidget.activeListenable?.removeListener(_onHomeActiveChanged);
+      widget.activeListenable?.addListener(_onHomeActiveChanged);
+      _beginContentLayoutVisit();
+    }
     final contentChanged = !identical(oldWidget.homeContent, widget.homeContent) ||
         !identical(oldWidget.homeContentCapabilities, widget.homeContentCapabilities);
     if (contentChanged) {
@@ -317,13 +343,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadUserId = null;
     _loadAuthScope = null;
     _promoLoadGeneration++;
+    _beginContentLayoutVisit();
     unawaited(_load());
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.activeListenable?.removeListener(_queuePromoImpressions);
+    widget.activeListenable?.removeListener(_onHomeActiveChanged);
     widget.homeContent?.removeListener(_onContentAccessChanged);
     _observedContentCaps?.removeListener(_onContentCapabilityChanged);
     CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)?.removeListener(_onCachedReadReady);
@@ -384,6 +411,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_loadUserId != userId) {
       _data = null;
       _error = null;
+      _beginContentLayoutVisit();
       _avatarPrecacheKey = null;
       _promo = const HomePromoLoadResult(intentionallyEmpty: true);
       ++_promoMediaGeneration;
@@ -772,6 +800,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (data == null) return const SizedBox.shrink();
     final newsUser = _loadUserId;
     final newsOwner = _loadAuthScope;
+    final promoPlacements = _promoPlacements();
     _queuePromoImpressions();
 
     if (!data.isScheduleForToday && !_loading) {
@@ -803,8 +832,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
             child: StudentHomeView(
               data: _toPresentationData(data),
+              contentLayoutVisit: _contentLayoutVisit,
               notificationCount: _unreadNotificationCount,
-              onRefresh: _load,
+              onRefresh: _refreshFromGesture,
               onNotificationsTap:
                   widget.cachedReader == null ? _openNotifications : null,
               onNewsTap: (index) => _showNewsFeed(data.news, index,
@@ -834,8 +864,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ? null
                   : (_promo.isDemoFallback ? null : _promo.payload),
               homePromoIsDemo: _promo.showDemoBadge && _promo.cards.length <= 1,
-              hideHomePromo: _promoPlacements().isEmpty,
-              homePromoPlacements: _promoPlacements(),
+              hideHomePromo: promoPlacements.isEmpty,
+              homePromoPlacements: promoPlacements,
               // Placements carry per-card callbacks; these remain as single-slot fallbacks.
               onHelpTap: () => _onHomePromoTap(card: _promo.card),
               onHomePromoDismiss: _promo.card == null
@@ -1467,7 +1497,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_promo.cards.isEmpty) return const [];
     return [
       for (final card in _promo.cards)
-        if (_promoReady(card))
+        if (_showPromoInCurrentVisit(card))
           StudentHomePromoPlacement(
             anchorKey: _promoKeys.putIfAbsent(card.id, GlobalKey.new),
             payload: card.homePromo,
@@ -1483,6 +1513,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             imageLoading: _promoImageStates[card.id]?.isLoading == true,
           ),
     ];
+  }
+
+  bool _showPromoInCurrentVisit(ManagedContentCard card) {
+    if (_promoReady(card)) {
+      _shownPromosThisVisit.add(card.id);
+      return true;
+    }
+    // An existing authorized card can show its own image fallback at the same
+    // height while a replacement cover loads. New cards still wait for bytes.
+    return _shownPromosThisVisit.contains(card.id) &&
+        _promoAssetIdentities[card.id] == _promoIdentity(card);
   }
 
   void _maybeRecordPromoImpression(HomePromoLoadResult promo) {

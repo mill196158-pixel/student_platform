@@ -136,6 +136,11 @@ void main() {
 
     Future<void> openCard(String body) async {
       final strip = find.byType(StudentHomeNewsFeed);
+      await until(() => strip.evaluate().isNotEmpty, 'Home news strip mounted');
+      if (strip.hitTestable().evaluate().isEmpty) {
+        await tester.ensureVisible(strip);
+        await tester.pump(const Duration(milliseconds: 350));
+      }
       await until(
           () => strip.hitTestable().evaluate().isNotEmpty, 'Home news strip');
       final list = find.descendant(of: strip, matching: find.byType(ListView));

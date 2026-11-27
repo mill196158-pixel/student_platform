@@ -445,6 +445,7 @@ class ChatMessageList extends StatelessWidget {
               selected: !selectingMessages && hoveredMessageId == m.id,
               boundaryKey: null,
               receiptTicks: receiptTicks,
+              showTeamChatLinks: !isDirectChat,
               canModerateTopicSelection: canModerateTopicSelection,
               canModerateCollection: canModerateCollection,
               canDeleteGroupAction: canDeleteGroupAction,
@@ -480,6 +481,7 @@ class ChatMessageList extends StatelessWidget {
               canEditOwnBeforeActivity: canEditOwnBeforeActivity,
               boundaryKey: null,
               receiptTicks: receiptTicks,
+              showTeamChatLinks: !isDirectChat,
             );
 
             final bubbleWithKey = bubble;

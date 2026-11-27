@@ -27,6 +27,7 @@ import 'package:student_platform/src/ui/learning/team_details_screen.dart';
 import 'package:student_platform/src/ui/learning/tabs/files_tab.dart';
 import 'package:student_platform/src/ui/learning/widgets/fullscreen_image.dart';
 import 'package:student_platform/src/ui/navigation/navigation_screen.dart';
+import 'package:student_ui/student_ui.dart' show StudentBottomNav;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'support/local_schema_http_client.dart';
@@ -40,8 +41,10 @@ class _HeldMembership {
 }
 
 class _ProjectChatHttpClient extends LocalSchemaHttpClient {
-  _ProjectChatHttpClient(super.port);
+  _ProjectChatHttpClient(super.port, {this.recordCapabilities = false});
 
+  final bool recordCapabilities;
+  final capabilityResponses = <({String chatId, String? proposeReason})>[];
   _HeldMembership? holdMembership;
 
   @override
@@ -59,8 +62,200 @@ class _ProjectChatHttpClient extends LocalSchemaHttpClient {
       return http.StreamedResponse(Stream.value(bytes), response.statusCode,
           headers: response.headers, request: request);
     }
-    return super.send(request);
+    final response = await super.send(request);
+    if (!recordCapabilities ||
+        request is! http.Request ||
+        request.url.path != '/rest/v1/rpc/get_chat_composer_capabilities' ||
+        response.statusCode != 200) {
+      return response;
+    }
+    final bytes = await response.stream.toBytes();
+    final params = jsonDecode(request.body) as Map<String, dynamic>;
+    final capabilities = jsonDecode(utf8.decode(bytes));
+    if (capabilities is Map<String, dynamic>) {
+      final reasons = capabilities['reasons'];
+      capabilityResponses.add((
+        chatId: params['p_chat_id'] as String,
+        proposeReason: reasons is Map ? reasons['propose_assignment'] as String? : null,
+      ));
+    }
+    return http.StreamedResponse(Stream.value(bytes), response.statusCode,
+        headers: response.headers, request: request);
   }
+}
+
+typedef _WaterCourse = ({String key, String title, String history,
+  String teamId, String chatId, String offeringId, String linkMessageId,
+  String subjectAction});
+
+Future<void> _verifyWaterChatRoutes(
+  WidgetTester tester,
+  Map<String, dynamic> config,
+  SupabaseClient client,
+  _ProjectChatHttpClient transport,
+  Future<void> Function(bool Function(), String) wait,
+  Future<void> Function(Finder) tap,
+  Future<void> Function() back,
+  Future<void> Function(String) showSubjectAction,
+) async {
+  final account = config['student'] as String;
+  final _WaterCourse reliability = (
+    key: 'reliability',
+    title: 'Надежность систем водоснабжения и водоотведения',
+    history: 'История Надежности водоснабжения',
+    teamId: config['team_project'] as String,
+    chatId: config['chat_project'] as String,
+    offeringId: config['off_project'] as String,
+    linkMessageId: config['link_to_project'] as String,
+    subjectAction: 'Чат курсового проекта',
+  );
+  final _WaterCourse modeling = (
+    key: 'modeling',
+    title: 'Моделирование систем водоснабжения и водоотведения',
+    history: 'История Моделирования водоснабжения',
+    teamId: config['team_control'] as String,
+    chatId: config['chat_control'] as String,
+    offeringId: config['off_control'] as String,
+    linkMessageId: config['link_to_control'] as String,
+    subjectAction: 'Чат предмета',
+  );
+  final courses = [reliability, modeling];
+
+  Finder currentTeam(_WaterCourse course) => find.byElementPredicate((element) {
+        final widget = element.widget;
+        return widget is TeamDetailsScreen &&
+            widget.team.id == course.teamId &&
+            ModalRoute.isCurrentOf(element) == true;
+      });
+  Finder inside(Finder route, Finder child) =>
+      find.descendant(of: route, matching: child);
+  Finder navTab(String name) => inside(find.byType(StudentBottomNav), find.text(name));
+  Finder inboxRow(_WaterCourse course) =>
+      find.byKey(ValueKey<String>(course.chatId));
+  Finder messageLink(_WaterCourse course) =>
+      find.byKey(ValueKey('team-chat-message-link:${course.chatId}'));
+
+  Future<void> checkWritable(
+    _WaterCourse course,
+    String path,
+    Future<void> Function() open,
+  ) async {
+    final previousReplies = transport.capabilityResponses.length;
+    final held = _HeldMembership(course.teamId);
+    transport.holdMembership = held;
+    final route = currentTeam(course);
+    final composer = inside(route, find.byType(EditableText));
+    final historyList = inside(route, find.byType(ChatMessageList));
+    try {
+      await open();
+      await wait(() => route.evaluate().isNotEmpty,
+          '${course.title}: wrong team via $path');
+      expect(tester.widget<TeamDetailsScreen>(route).readOnly, isFalse);
+      expect(client.auth.currentUser!.id, account);
+      await wait(() => held.received.isCompleted,
+          '${course.title}: did not check independent membership via $path');
+      expect(composer, findsNothing);
+      expect(inside(route, find.text('Подключение к чату…')), findsOneWidget);
+      await wait(() => inside(route, find.text(course.history)).evaluate().isNotEmpty,
+          '${course.title}: expected original history via $path');
+      final before = tester.getRect(historyList);
+      expect(tester.widget<ChatMessageList>(historyList).messages
+          .singleWhere((message) => message.text == course.history).chatId, course.chatId);
+
+      held.release.complete();
+      await wait(() => composer.hitTestable().evaluate().isNotEmpty,
+          '${course.title}: editor after positive membership via $path');
+      expect(tester.getRect(historyList).top, closeTo(before.top, 1));
+      expect(tester.getRect(historyList).bottom, closeTo(before.bottom, 1));
+      await wait(
+        () => transport.capabilityResponses.skip(previousReplies).any(
+          (reply) => reply.chatId == course.chatId && reply.proposeReason == 'not_member',
+        ),
+        '${course.title}: missing fresh composer capabilities via $path',
+      );
+
+      final text = 'QA water ${course.key} $path';
+      await tester.enterText(composer, text);
+      final send = inside(route, find.byTooltip('Отправить')).hitTestable();
+      expect(send, findsOneWidget);
+      await tester.tap(send);
+      await wait(() => tester.widget<EditableText>(composer).controller.text.isEmpty,
+          '${course.title}: message not confirmed via $path');
+      final rows = await client.from('messages')
+          .select('chat_id,author_id').eq('body', text);
+      expect(rows, [{'chat_id': course.chatId, 'author_id': account}]);
+      print('PASS water chat ${course.key} via $path '
+          'account=$account team=${course.teamId} chat=${course.chatId} '
+          'readOnly=false propose_assignment=not_member send=allowed');
+    } finally {
+      if (!held.release.isCompleted) held.release.complete();
+      if (identical(transport.holdMembership, held)) transport.holdMembership = null;
+    }
+  }
+
+  await tap(navTab('Обучение'));
+  for (final course in courses) {
+    await checkWritable(course, 'learning-menu', () => tap(find.text(course.title)));
+    await back();
+  }
+
+  await tap(navTab('База'));
+  for (final course in courses) {
+    await tap(find.text(course.title));
+    expect(tester.widget<SubjectInfoScreen>(find.byType(SubjectInfoScreen))
+        .subjectOfferingId, course.offeringId);
+    await showSubjectAction(course.subjectAction);
+    await checkWritable(course, 'materials', () => tap(find.text(course.subjectAction)));
+    await back();
+    await back();
+  }
+
+  await tap(navTab('Профиль'));
+  final openInbox = find.text('Сообщения');
+  for (final course in courses) {
+    await tap(openInbox);
+    await checkWritable(course, 'inbox', () => tap(inboxRow(course)));
+    await back();
+  }
+
+  for (final (source, target) in [(modeling, reliability), (reliability, modeling)]) {
+    await tap(openInbox);
+    await tap(inboxRow(source));
+    final sourceRoute = currentTeam(source);
+    await wait(() => inside(sourceRoute, messageLink(target)).hitTestable()
+        .evaluate().isNotEmpty, 'Persisted link in ${source.title}');
+    final history = inside(sourceRoute, find.byType(ChatMessageList));
+    final message = tester.widget<ChatMessageList>(history).messages
+        .singleWhere((row) => row.id == target.linkMessageId);
+    expect(message.chatId, source.chatId);
+    expect(message.text, contains('studentplatform://chat/${target.chatId}'));
+    await checkWritable(target, 'message-link', () => tap(inside(sourceRoute, messageLink(target))));
+    await back();
+    expect(sourceRoute, findsOneWidget);
+    await back();
+  }
+
+  // Revoke only the disposable student's membership to check the denial path.
+  // The ordinary list policy still allows reading the enrolled subject.
+  await client.rpc('fixture_deny_project_writes');
+  await tap(openInbox);
+  await tap(inboxRow(modeling));
+  final source = currentTeam(modeling);
+  await tap(inside(source, messageLink(reliability)));
+  await wait(() => find.text('Этот чат вам недоступен').evaluate().isNotEmpty,
+      'Revoked membership must deny the inline link');
+  expect(source, findsOneWidget);
+  expect(currentTeam(reliability), findsNothing);
+  await back();
+
+  await tap(openInbox);
+  await tap(inboxRow(reliability));
+  final readOnly = currentTeam(reliability);
+  await wait(() => inside(readOnly, find.text('Только чтение. Отправка недоступна.'))
+      .evaluate().isNotEmpty, 'Readable history without write membership');
+  expect(inside(readOnly, find.text(reliability.history)), findsOneWidget);
+  expect(inside(readOnly, find.byType(EditableText)), findsNothing);
+  print('PASS water chat denied link and read-only account=$account chat=${reliability.chatId}');
 }
 
 void main() {
@@ -70,11 +265,14 @@ void main() {
     test('requires the isolated project-chat fixture', () {}, skip: true);
     return;
   }
-  testWidgets(
-      '036 opens the course-project PDF from materials and restores both routes',
+  final cfg = jsonDecode(raw) as Map<String, dynamic>;
+  final water = cfg['water'] == true;
+  testWidgets(water
+      ? 'Water-supply teams from menu, inbox and persisted message links'
+      : '036 opens the course-project PDF from materials and restores both routes',
       (t) async {
-    final cfg = jsonDecode(raw) as Map<String, dynamic>;
-    expect(cfg['schema'], matches(RegExp(r'^e2e_projectchat_[a-f0-9]{12}$')));
+    expect(cfg['schema'], matches(RegExp(
+        water ? r'^e2e_waterchat_[a-f0-9]{12}$' : r'^e2e_projectchat_[a-f0-9]{12}$')));
     t.view.devicePixelRatio = 1;
     t.view.physicalSize = const Size(390, 844);
     t.view.padding = const FakeViewPadding(top: 47, bottom: 34);
@@ -84,7 +282,7 @@ void main() {
     addTearDown(t.view.resetViewInsets);
     await initializeDateFormatting('ru');
     SharedPreferences.setMockInitialValues({});
-    final transport = _ProjectChatHttpClient(cfg['restPort'] as int);
+    final transport = _ProjectChatHttpClient(cfg['restPort'] as int, recordCapabilities: water);
     await Supabase.initialize(
         url: localSupabaseUrl,
         publishableKey: cfg['anon'] as String,
@@ -187,6 +385,10 @@ void main() {
       await wait(() => find.byType(NavigationScreen).evaluate().isNotEmpty,
           'Student home did not open');
       expect(sb.auth.currentUser!.id, cfg['student']);
+      if (water) {
+        await _verifyWaterChatRoutes(t, cfg, sb, transport, wait, tap, back, showSubjectAction);
+        return;
+      }
       await tap(find.text('База'));
       await tap(find.text('Курсовой проект и практика'));
       await wait(() => find.text('Чат').evaluate().isNotEmpty,

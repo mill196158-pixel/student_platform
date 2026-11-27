@@ -2,11 +2,15 @@
 // FILE: lib/src/ui/learning/tabs/chat/message_bubble.dart
 // =============================
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:student_ui/student_ui.dart' show ContentNavChat;
+import '../../../../core/auth_session_scope_host.dart';
+import '../../../content/content_nav_executor.dart';
 import '../../models/message.dart';
 import '../../models/chat_file.dart';
 import '../../widgets/file_card.dart';
@@ -35,6 +39,7 @@ class MessageBubble extends StatelessWidget {
 
   /// DM receipts: null = legacy single ✓; 0/1/2 = none/delivered/read.
   final int? receiptTicks;
+  final bool showTeamChatLinks;
 
   /// When provided, rendering must not resolve avatars, files, or actions
   /// through online widgets. The caller supplies already-authorised files.
@@ -59,6 +64,7 @@ class MessageBubble extends StatelessWidget {
     this.boundaryKey,
     this.selected = false,
     this.receiptTicks,
+    this.showTeamChatLinks = false,
     this.localOnlyUserId,
     this.localOnlyAttachmentBuilder,
   });
@@ -315,6 +321,9 @@ class MessageBubble extends StatelessWidget {
                               text: message.text,
                               time: displayTime,
                               textColor: textColor,
+                              showTeamChatLinks: showTeamChatLinks &&
+                                  !localOnly &&
+                                  !message.isLocal,
                             ),
                           ] else if (message.isLocal &&
                               message.outboundFileIds.isNotEmpty &&
@@ -439,12 +448,41 @@ class _TextMessageContent extends StatelessWidget {
   final String text;
   final String time;
   final Color textColor;
+  final bool showTeamChatLinks;
 
   const _TextMessageContent({
     required this.text,
     required this.time,
     required this.textColor,
+    this.showTeamChatLinks = false,
   });
+
+  static final _teamChatLink = RegExp(
+    r'(?<!\S)studentplatform://chat/'
+    r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?=$|\s|[.,;!](?:$|\s))',
+  );
+
+  InlineSpan? _linkedText(TextStyle style) {
+    if (!showTeamChatLinks) return null;
+    final links = _teamChatLink.allMatches(text).iterator;
+    if (!links.moveNext()) return null;
+    final spans = <InlineSpan>[];
+    var end = 0;
+    do {
+      final match = links.current;
+      if (match.start > end) {
+        spans.add(TextSpan(text: text.substring(end, match.start)));
+      }
+      spans.add(WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: _TeamChatMessageLink(chatId: match.group(1)!.toLowerCase(), style: style),
+      ));
+      end = match.end;
+    } while (links.moveNext());
+    if (end < text.length) spans.add(TextSpan(text: text.substring(end)));
+    return TextSpan(style: style, children: spans);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -454,6 +492,21 @@ class _TextMessageContent extends StatelessWidget {
       fontSize: 11,
       height: 1.0,
     );
+    final linkedText = _linkedText(textStyle);
+    if (linkedText != null) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text.rich(linkedText),
+          const SizedBox(height: 3),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(time, style: timeStyle),
+          ),
+        ],
+      );
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -519,6 +572,60 @@ class _TextMessageContent extends StatelessWidget {
       },
     );
   }
+}
+
+class _TeamChatMessageLink extends StatelessWidget {
+  const _TeamChatMessageLink({required this.chatId, required this.style});
+
+  final String chatId;
+  final TextStyle style;
+
+  Future<void> _open(BuildContext context) async {
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    final owner = scope?.capture();
+    final route = ModalRoute.of(context);
+    if (scope == null || owner == null) return;
+
+    bool current() =>
+        context.mounted && route?.isCurrent != false && scope.isCurrent(owner);
+
+    await const ContentNavExecutor().execute(
+      context,
+      ContentNavChat(targetMode: 'chat_id', targetId: chatId),
+      isCurrent: current,
+      onUnavailableMessage: (message) {
+        if (current()) {
+          ScaffoldMessenger.maybeOf(context)
+              ?.showSnackBar(SnackBar(content: Text(message)));
+        }
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    link: true,
+    child: InkWell(
+      key: ValueKey('team-chat-message-link:$chatId'),
+      onTap: () => unawaited(_open(context)),
+      borderRadius: BorderRadius.circular(8),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: Align(
+          widthFactor: 1,
+          heightFactor: 1,
+          child: Text(
+            'Открыть чат',
+            style: style.copyWith(
+              decoration: TextDecoration.underline,
+              decorationColor: style.color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _DeliveryStateRow extends StatelessWidget {

@@ -23,6 +23,7 @@ class ContentNavExecutor {
     VoidCallback? onUnavailable,
     void Function(String message)? onUnavailableMessage,
     VoidCallback? onDisabled,
+    bool Function()? isCurrent,
   }) async {
     void notifyUnavailable(String message) {
       if (onUnavailableMessage != null) {
@@ -58,6 +59,7 @@ class ContentNavExecutor {
           context,
           targetMode: targetMode,
           targetId: targetId,
+          isCurrent: isCurrent,
           onUnavailable: () => notifyUnavailable('Этот чат вам недоступен'),
         );
       case ContentNavReferenceArticle():
@@ -72,8 +74,11 @@ class ContentNavExecutor {
     BuildContext context, {
     required String targetMode,
     required String? targetId,
+    bool Function()? isCurrent,
     required VoidCallback onUnavailable,
   }) async {
+    bool current() => context.mounted && (isCurrent?.call() ?? true);
+    if (!current()) return;
     try {
       final resolved = await _sb.rpc(
         'content_resolve_chat_cta',
@@ -82,9 +87,12 @@ class ContentNavExecutor {
           if (targetId != null) 'p_target_id': targetId,
         },
       );
+      if (!current()) return;
       final chatId = resolved?.toString().trim();
-      if (chatId == null || chatId.isEmpty) {
-        if (context.mounted) onUnavailable();
+      if (chatId == null ||
+          chatId.isEmpty ||
+          (targetMode == 'chat_id' && chatId.toLowerCase() != targetId?.toLowerCase())) {
+        onUnavailable();
         return;
       }
 
@@ -92,10 +100,12 @@ class ContentNavExecutor {
           .from('chats')
           .select('team_id')
           .eq('id', chatId)
+          .eq('type', 'team_main')
           .maybeSingle();
+      if (!current()) return;
       final teamId = (teamRow?['team_id'] ?? '').toString().trim();
       if (teamId.isEmpty) {
-        if (context.mounted) onUnavailable();
+        onUnavailable();
         return;
       }
 
@@ -107,8 +117,9 @@ class ContentNavExecutor {
           )
           .eq('id', teamId)
           .maybeSingle();
-      if (row == null) {
-        if (context.mounted) onUnavailable();
+      if (!current()) return;
+      if (row == null || row['id'] != teamId) {
+        onUnavailable();
         return;
       }
 
@@ -129,7 +140,6 @@ class ContentNavExecutor {
         kind: (row['kind'] ?? 'subject').toString(),
       );
 
-      if (!context.mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => TeamDetailsScreen(
@@ -139,7 +149,7 @@ class ContentNavExecutor {
         ),
       );
     } catch (_) {
-      if (context.mounted) onUnavailable();
+      if (current()) onUnavailable();
     }
   }
 

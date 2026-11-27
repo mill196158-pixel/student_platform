@@ -216,6 +216,7 @@ Bubble buildBubble({
   bool selected = false,
   Key? boundaryKey,
   int? receiptTicks,
+  bool showTeamChatLinks = false,
   bool? canModerateTopicSelection,
   bool? canDeleteGroupAction,
   bool? canModerateCollection,
@@ -339,5 +340,6 @@ Bubble buildBubble({
     onRetryFailed: onRetryFailed,
     selected: selected,
     receiptTicks: receiptTicks,
+    showTeamChatLinks: showTeamChatLinks,
   );
 }

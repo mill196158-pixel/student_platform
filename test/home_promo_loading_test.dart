@@ -43,7 +43,9 @@ class Promo implements HomePromoService {
   @override
   Future<HomePromoLoadResult> load({bool writeCache = true}) => pending.future;
   @override
-  Future<HomePromoLoadResult> loadCached() async => HomePromoLoadResult(cards: [
+  Future<HomePromoLoadResult> loadCached() async => withCover('image-a');
+
+  HomePromoLoadResult withCover(String cover) => HomePromoLoadResult(cards: [
         ManagedContentCard.tryParseHomePromo({
           'id': 'cached',
           'template_key': 'home_promo_v1',
@@ -61,7 +63,7 @@ class Promo implements HomePromoService {
             'cta_route': '/my-diary',
             'dismissible': true,
             'card_variant': 'image_full',
-            'image_asset_id': 'image-a',
+            'image_asset_id': cover,
             'icon_asset_id': 'icon-a',
             'home_slot': 'after_news'
           },
@@ -86,10 +88,15 @@ class Media implements ContentMediaService {
 class SlowMedia extends Media {
   final image = Completer<Uint8List?>();
   final icon = Completer<Uint8List?>();
+  final replacement = Completer<Uint8List?>();
   @override
   Future<Uint8List?> fetchBytes(String id, {String? contentVersion}) {
     requested.add(id);
-    return id == 'image-a' ? image.future : icon.future;
+    return switch (id) {
+      'image-a' => image.future,
+      'image-b' => replacement.future,
+      _ => icon.future,
+    };
   }
 }
 
@@ -125,6 +132,55 @@ HomeDashboardData partial(String id, String name) => HomeDashboardData(
     assignmentsStatus: 'Загружаем ближайшие дела…');
 
 void main() {
+  testWidgets('replacement promo cover preserves the existing slot and hides old bytes',
+      (t) async {
+    final dashboard = ProgressiveDashboard();
+    final notifications = Notifications()..pending.complete(0);
+    final promo = Promo();
+    final media = SlowMedia();
+    final bytes = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==');
+    await t.pumpWidget(MaterialApp(
+      home: HomeScreen(
+        dashboardService: dashboard,
+        promoService: promo,
+        contentMedia: media,
+        notificationsApi: notifications,
+      ),
+    ));
+    await t.pump();
+    media.image.complete(bytes);
+    media.icon.complete(null);
+    await t.pump();
+    await t.pump();
+    dashboard.requests.single.complete(partial('a', 'Alice'));
+    await t.pumpAndSettle();
+    final summary = find.text('Сводка дня');
+    final card = find.text('Cached promo');
+    final summaryPosition = t.getTopLeft(summary);
+    final originalCardPosition = t.getTopLeft(card);
+    expect(originalCardPosition.dy, lessThan(summaryPosition.dy));
+
+    promo.pending.complete(promo.withCover('image-b'));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 30));
+    expect(media.requested, contains('image-b'));
+    final placement = t.widget<StudentHomeView>(find.byType(StudentHomeView))
+        .homePromoPlacements.single;
+    expect(placement.imageLoading, isTrue);
+    expect(placement.imageBytes, isNull);
+    expect(t.getTopLeft(summary), summaryPosition);
+    expect(t.getTopLeft(card), originalCardPosition);
+
+    media.replacement.complete(bytes);
+    await t.pumpAndSettle();
+    expect(t.getTopLeft(summary), summaryPosition);
+    expect(t.getTopLeft(card), originalCardPosition);
+    expect(t.widget<StudentHomeView>(find.byType(StudentHomeView))
+        .homePromoPlacements.single.imageState?.isReady, isTrue);
+    await t.pumpWidget(const SizedBox());
+  });
+
   testWidgets('ready promo is not counted behind loading or an inactive tab',
       (t) async {
     final active = ValueNotifier<bool>(false);

@@ -883,6 +883,20 @@ schedule, assignments, and news have finished reading their snapshots. In an
 online session the Home cache reads also complete independently, and a late
 cache section cannot replace a newer live section.
 
+The signed-in Home uses the currently available news and promo placements when
+the visit starts. Media becoming ready in an existing section keeps that
+section in place. A section that first becomes available mid-visit appears
+after the visible dashboard sections so it does not push the schedule or
+assignments down. Returning to Home or pulling to refresh adopts the configured
+placement of all available sections. Each section still follows the existing
+publication and session checks.
+
+Team message text can contain a `studentplatform://chat/<uuid>` link to a
+main chat. The in-app tap uses `content_resolve_chat_cta` for the exact chat ID
+and keeps the source route and session valid throughout navigation. The
+destination checks send access separately from the capabilities of composer
+actions such as proposing an assignment.
+
 Profile paints its validated local header before session refresh finishes; authentication and password policy remain in the outer auth flow. Two profile cards hydrate concurrently; each card starts image and icon requests together and paints each asset independently. Profile opts into the existing account/asset/version-scoped persistent media cache with unchanged grant expiry checks. No database permissions or server schema changes are part of this performance fix.
 
 
