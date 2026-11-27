@@ -903,6 +903,14 @@ downloads. The remaining verified cards stay visible through temporary media
 errors. The committed replacement contains the prepared card images and icons.
 Live-only navigation remains subject to the online route and session policy.
 
+Ordinary online Home can also prepare news covers from its verified SQLite
+snapshot. The saved publication must already be in the current account's
+local listing. The cover comes from the same publication and exact Storage
+path. A verified row with a strictly newer update time can replace that
+publication's presentation and cover together. The temporary image index
+continues to enforce suppression, including after a file has been evicted.
+The reader reuses the verified copy under the same checks.
+
 Profile settings show the size of the replaceable image cache when measured
 and offer one clear action. This action preserves conversations, drafts,
 profile data and downloaded or explicitly saved offline files. Inventory

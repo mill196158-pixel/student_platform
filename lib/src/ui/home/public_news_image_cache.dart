@@ -100,6 +100,7 @@ class PublicNewsImageCache {
         final store = await _store();
         return store.readWithLegacy(key, () async =>
             await legacyFallback?.call() ?? await _legacy.peekLegacyReadOnly(key),
+            readVerifiedCopyAfterEviction: legacyFallback,
             legacyTimeout: Duration(microseconds: (operationTimeout.inMicroseconds ~/ 2).clamp(1, 500000)));
       })().timeout(operationTimeout);
       if (clearEpoch != _clearEpoch || pathEpoch != (_pathEpoch[key.path] ?? 0)) {

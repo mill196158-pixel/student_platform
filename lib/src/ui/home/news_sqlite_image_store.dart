@@ -19,6 +19,10 @@ class NewsImageWriteTicket {
 
 enum NewsImageReadState { hit, miss, unknown }
 
+class _IndexedImageMissing implements Exception {
+  const _IndexedImageMissing();
+}
+
 class NewsImageReadResult {
   const NewsImageReadResult(this.state, [this.bytes]);
   final NewsImageReadState state;
@@ -437,7 +441,9 @@ class NewsSqliteImageStore {
       final filename = row['filename'];
       if (filename is! String || !RegExp(r'^[A-Za-z0-9_-]{32}\.bin$').hasMatch(filename)) throw StateError('Invalid image path');
       final file = File('$ns/$filename');
-      if (await FileSystemEntity.type(file.path, followLinks: false) != FileSystemEntityType.file) throw StateError('Missing image');
+      final kind = await FileSystemEntity.type(file.path, followLinks: false);
+      if (kind == FileSystemEntityType.notFound) throw const _IndexedImageMissing();
+      if (kind != FileSystemEntityType.file) throw StateError('Invalid image file');
       try {
         await debugBeforeImageRead?.call();
         final data = await file.readAsBytes();
@@ -450,7 +456,8 @@ class NewsSqliteImageStore {
   /// durable suppression. Errors are unknown, never a cached miss.
   Future<NewsImageReadResult> readWithLegacy(NewsImageCacheKey key,
       Future<Uint8List?> Function() readLegacy,
-      {Duration legacyTimeout = _acquisitionTimeout}) async {
+      {Duration legacyTimeout = _acquisitionTimeout,
+      Future<Uint8List?> Function()? readVerifiedCopyAfterEviction}) async {
     try {
       final ns = await _namespace();
       // Bootstrap is committed before a timed callback can abort its own
@@ -458,7 +465,16 @@ class NewsSqliteImageStore {
       await _transaction((tx) => _schema(tx, ns));
       return await _transaction((tx) async {
         await _schema(tx, ns);
-        final data = await _readInTransaction(tx, ns, key);
+        Uint8List? data;
+        var readFallback = readLegacy;
+        try {
+          data = await _readInTransaction(tx, ns, key);
+        } on _IndexedImageMissing {
+          // iOS can remove the temp blob while the durable index survives.
+          // In that case accept only an independently verified snapshot copy.
+          if (readVerifiedCopyAfterEviction == null) rethrow;
+          readFallback = readVerifiedCopyAfterEviction;
+        }
         if (data != null) return NewsImageReadResult(NewsImageReadState.hit, data);
         final suppression = await tx.query('news_store_suppression',
             where: 'namespace=? AND path IN (?,?)', whereArgs: [ns, '', key.path]);
@@ -471,7 +487,7 @@ class NewsSqliteImageStore {
         // after a stalled legacy lookup times out and rolls back.
         final maxLegacyWait = _acquisitionTimeout ~/ 2;
         final wait = legacyTimeout < maxLegacyWait ? legacyTimeout : maxLegacyWait;
-        final legacy = await readLegacy().timeout(wait);
+        final legacy = await readFallback().timeout(wait);
         return legacy == null || legacy.isEmpty
             ? const NewsImageReadResult(NewsImageReadState.miss)
             : NewsImageReadResult(NewsImageReadState.hit, legacy);

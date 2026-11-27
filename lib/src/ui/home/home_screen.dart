@@ -282,8 +282,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _authScope = source;
     _authScope?.addListener(_onAuthScopeChanged);
     _ownsService = widget.dashboardService == null;
-    _service =
-        widget.dashboardService ?? HomeDashboardService(sessionScope: source);
+    _service = widget.dashboardService ?? _createDashboardService(source);
     _serviceInitialized = true;
     unawaited(_load());
     if (source != null && source.capture() == null) {
@@ -293,6 +292,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       }));
     }
+  }
+
+  HomeDashboardService _createDashboardService(AuthSessionScope? scope) =>
+      HomeDashboardService(
+          sessionScope: scope, readVerifiedNews: _readVerifiedOnlineNews);
+
+  Future<HomeContentSnapshot?> _readVerifiedOnlineNews() async {
+    if (!mounted || widget.cachedReader != null) return null;
+    final content = widget.homeContent;
+    final barrier = widget.onlineBarrier;
+    if (content == null || barrier == null || !barrier.isOpen) return null;
+    final saved = await content.readOnline('news', barrier);
+    return mounted && widget.cachedReader == null &&
+            identical(content, widget.homeContent) &&
+            identical(barrier, widget.onlineBarrier) && barrier.isOpen &&
+            !content.isDenied('news')
+        ? saved
+        : null;
   }
 
   void _onAuthScopeChanged() {
@@ -375,8 +392,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (serviceChanged) {
       if (_ownsService) _service.dispose();
       _ownsService = widget.dashboardService == null;
-      _service = widget.dashboardService ??
-          HomeDashboardService(sessionScope: _authScope);
+      _service = widget.dashboardService ?? _createDashboardService(_authScope);
     }
     _resetVisibleSnapshot();
     _loadInFlight = null;
@@ -659,6 +675,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             : _withoutNewsCovers(data);
     HomeDashboardData? pending;
     Future<void>? firstPaint;
+    var firstFramePending = false;
     void commit(HomeDashboardData data, {PreparedHomePromos? promos}) {
       if (!current()) return;
       if (!reportedFirstContent &&
@@ -685,31 +702,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!current()) return;
       pending = data;
       if (_data != null) {
-        commit(data);
+        if (!firstFramePending) commit(data);
         return;
       }
       firstPaint ??= () async {
         trace.mark('home_core_ready');
         const budget = Duration(milliseconds: 600);
-        final preparedNews = () async {
-          final clock = Stopwatch()..start();
-          while (current() && clock.elapsed < budget) {
-            final covers = _firstCoverBytes(currentCovers(pending!));
-            await _prepareFirstNewsCovers(covers, current, budget - clock.elapsed);
-            if (!current() ||
-                listEquals(covers, _firstCoverBytes(currentCovers(pending!)))) {
-              break;
-            }
-          }
-        }();
+        final initialCovers = _firstCoverBytes(currentCovers(data));
+        final preparedNews = _prepareFirstNewsCovers(initialCovers, current, budget);
         final promos = await cachedPromos;
         await preparedNews;
+        if (!current()) return;
+        final candidate = pending!;
+        final covers = _firstCoverBytes(currentCovers(candidate));
+        if (!listEquals(initialCovers, covers)) {
+          await _prepareFirstNewsCovers(covers, current, budget);
+        }
         trace.mark('home_cover_decode_complete');
         if (!current()) return;
-        commit(pending!, promos: promos);
+        final latest = pending!;
+        final sameCovers = listEquals(covers, _firstCoverBytes(currentCovers(latest)));
+        final first = sameCovers ? latest : candidate;
+        firstFramePending = true;
+        commit(first, promos: promos);
         trace.mark('home_ready', counts: _readyCounts(_data!));
         trace.markNextRaster('home_first', current: () =>
             current() && widget.activeListenable?.value != false);
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          firstFramePending = false;
+          if (!current() || identical(pending, first)) return;
+          final update = pending!;
+          final updateCovers = _firstCoverBytes(currentCovers(update));
+          if (!listEquals(covers, updateCovers)) {
+            await _prepareFirstNewsCovers(updateCovers, current, budget);
+          }
+          if (current() && identical(pending, update)) commit(update);
+        });
         refreshOptionalContent();
       }();
     }
@@ -1348,7 +1376,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     bool current() =>
         mounted &&
         navigator.mounted &&
-        _data?.news.any((item) => item.id == initial.id) == true &&
+        _data?.news.any((item) => item.id == initial.id &&
+            item.imageCacheKey?.path == initial.imageCacheKey?.path) == true &&
         identical(_service, service) &&
         service.currentUserId == userId &&
         identical(widget.cachedReader, reader) &&

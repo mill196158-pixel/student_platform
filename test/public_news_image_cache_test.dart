@@ -124,6 +124,28 @@ void main() {
     expect(fallbackCalls, 0);
   });
 
+  test('only a verified snapshot can replace an evicted indexed file', () async {
+    await legacy.put(key, Uint8List.fromList([1]));
+    expect(await storeA.put(key, Uint8List.fromList([2]), await storeA.capture(key)),
+        isTrue);
+    final blob = (await storeA.root.list().toList())
+        .whereType<File>().singleWhere((file) => file.path.endsWith('.bin'));
+    await blob.delete();
+    expect((await a.read(key)).state, NewsImageReadState.unknown);
+
+    var verifiedReads = 0;
+    Future<Uint8List> verifiedCopy() async {
+      verifiedReads++;
+      return Uint8List.fromList([2]);
+    }
+
+    expect((await a.read(key, legacyFallback: verifiedCopy)).bytes, [2]);
+    await b.invalidate(key.path);
+    expect((await a.read(key, legacyFallback: verifiedCopy)).state,
+        NewsImageReadState.miss);
+    expect(verifiedReads, 1);
+  });
+
   test('8 MiB image is admitted for optional persistence', () async {
     final spy = _CountingStore(database: dbA, root: Directory('${root.path}/blobs'));
     final counting = _CountingBudget(roots: () async => [root]);

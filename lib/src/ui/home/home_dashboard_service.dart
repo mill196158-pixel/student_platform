@@ -31,6 +31,7 @@ import 'package:student_platform/src/ui/schedule/schedule_prewarm.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/core/transport_failure.dart';
 import 'package:student_platform/src/ui/home/home_frame_trace.dart';
+import 'package:student_platform/src/ui/info/home_content_snapshot_store.dart';
 
 class HomeDashboardService {
   HomeDashboardService({
@@ -44,8 +45,10 @@ class HomeDashboardService {
     AuthSessionScope? sessionScope,
     HomeSnapshotCache? snapshotCache,
     HomeSnapshotCache? projectSnapshotCache,
+    Future<HomeContentSnapshot?> Function()? readVerifiedNews,
   })  : _sb = client ?? Supabase.instance.client,
         _sessionScope = sessionScope,
+        _readVerifiedNews = readVerifiedNews,
         _snapshotCache = snapshotCache ??
             (sessionScope == null
                 ? null
@@ -128,6 +131,7 @@ class HomeDashboardService {
   final http.Client _http;
   final bool _ownsHttpClient;
   final AuthSessionScope? _sessionScope;
+  final Future<HomeContentSnapshot?> Function()? _readVerifiedNews;
   final HomeSnapshotCache? _snapshotCache;
   final HomeSnapshotCache? _projectSnapshotCache;
   final _preparedCovers = <String, (NewsImageCacheKey, (int, int), Uint8List)>{};
@@ -542,23 +546,59 @@ class HomeDashboardService {
     final savedCoverVersions = <(String, String), String>{};
     var accepting = true;
     return (() async {
+      final verifiedRead = _loadVerifiedNewsCovers();
       cached = await _newsCache.read(
         owner: owner,
         isCurrent: current,
         onSavedCoverVersion: (post, version) => savedCoverVersions[post] = version,
       );
       if (!accepting || !current() || cached.isEmpty) return const <HomeNewsItem>[];
-      final first = await _hydrateImagesFromDisk(cached.take(4).toList(),
+      final verified = await verifiedRead;
+      if (!accepting || !current()) return const <HomeNewsItem>[];
+      final visible = <HomeNewsItem>[
+        for (final item in cached.take(4))
+          if (verified[item.id] case final saved?
+              when item.updatedAt != null &&
+                  saved.updatedAt?.isAfter(item.updatedAt!) == true)
+            saved
+          else
+            item,
+      ];
+      final first = await _hydrateImagesFromDisk(visible,
         keepPrepared: true,
         current: () => accepting && current(),
         onReady: (index, item) => ready[index] = item,
         savedCoverVersions: savedCoverVersions,
+        verifiedCovers: verified,
       );
       return [...first, ...cached.skip(4)];
     })().timeout(const Duration(seconds: 1), onTimeout: () {
       accepting = false;
       return [for (var index = 0; index < cached.length; index++) ready[index] ?? cached[index]];
     });
+  }
+
+  Future<Map<String, HomeNewsItem>> _loadVerifiedNewsCovers() async {
+    final read = _readVerifiedNews;
+    if (read == null) return const {};
+    try {
+      final saved = await read().timeout(const Duration(milliseconds: 500));
+      if (saved == null) return const {};
+      final covers = <String, HomeNewsItem>{};
+      for (final row in saved.rows) {
+        final media = row['_offline_image'];
+        if (media is! String) continue;
+        final bytes = saved.images[media];
+        if (bytes == null || bytes.isEmpty) continue;
+        final item = mapPublishedNews(row);
+        if (item.id.isNotEmpty && item.usesImage && item.imageCacheKey != null) {
+          covers[item.id] = item.copyWith(imageBytes: bytes);
+        }
+      }
+      return covers;
+    } catch (_) {
+      return const {};
+    }
   }
 
   List<HomeNewsItem> _retainCurrentCovers(List<HomeNewsItem> items) {
@@ -584,6 +624,7 @@ class HomeDashboardService {
     bool Function()? current,
     void Function(int, HomeNewsItem)? onReady,
     Map<(String, String), String> savedCoverVersions = const {},
+    Map<String, HomeNewsItem> verifiedCovers = const {},
   }) async {
     final out = List<HomeNewsItem>.of(items);
     var next = 0;
@@ -602,12 +643,14 @@ class HomeDashboardService {
         }
         if (key == null) continue;
         try {
-          final preloaded = item.imageBytes;
+          final saved = verifiedCovers[item.id];
+          final preloaded = saved?.imageCacheKey?.path == key.path
+              ? saved?.imageBytes
+              : (keepPrepared ? null : item.imageBytes);
           final version = _publicImages.displayVersion(key);
           var storedKey = key;
           var result = await _publicImages.read(key,
-              legacyFallback: preloaded == null || keepPrepared
-                  ? null : () async => preloaded);
+              legacyFallback: preloaded == null ? null : () async => preloaded);
           final savedVersion = savedCoverVersions[(item.id, key.path)];
           if (result.state == NewsImageReadState.miss && savedVersion != null &&
               savedVersion != key.version && current?.call() != false &&
