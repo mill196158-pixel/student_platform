@@ -52,11 +52,13 @@ class _Dashboard implements HomeDashboardService {
   _Dashboard({this.rejectImages = false});
   bool rejectImages;
   int imageValidationCalls = 0;
+  Completer<void>? imageValidationGate;
   @override
   String? get currentUserId => 'qa';
   @override
   Future<List<HomeNewsItem>> validateNewsImages(List<HomeNewsItem> items) async {
     imageValidationCalls++;
+    await imageValidationGate?.future;
     return rejectImages ? items.map((item) => item.copyWith(clearImageBytes: true)).toList() : items;
   }
   @override
@@ -104,6 +106,7 @@ class _OnlineDashboard extends _Dashboard {
 class _DelayedStoryDashboard extends _OnlineDashboard {
   final cover = Completer<Uint8List?>();
   int guardedReads = 0;
+  bool published = true;
 
   @override
   HomeDashboardData get data => HomeDashboardData(
@@ -112,14 +115,15 @@ class _DelayedStoryDashboard extends _OnlineDashboard {
       todayLessons: const [],
       assignments: const [],
       news: [
-        mapPublishedNews({
-          'id': 'with-cover',
-          'title': 'Cover on slow connection',
-          'body': 'Story body stays visible',
-          'created_at': '2026-11-27T00:00:00Z',
-          'variant': 'imageOverlay',
-          'image_path': 'news/cover.png',
-        }),
+        if (published)
+          mapPublishedNews({
+            'id': 'with-cover',
+            'title': 'Cover on slow connection',
+            'body': 'Story body stays visible',
+            'created_at': '2026-11-27T00:00:00Z',
+            'variant': 'imageOverlay',
+            'image_path': 'news/cover.png',
+          }),
       ]);
 
   @override
@@ -287,8 +291,7 @@ void main() {
       (tester) async {
     final dashboard = _DelayedStoryDashboard()..markGate.complete();
     final barrier = OnlineSideEffectBarrier(ownerIsCurrent: () => true);
-    final bytes = Uint8List.fromList(base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP8zwACTGCSAQANHQEDgslx/wAAAABJRU5ErkJggg=='));
+    final bytes = base64Decode(_coverPng);
     await tester.pumpWidget(MaterialApp(home: HomeScreen(
         dashboardService: dashboard, promoService: _Promo(),
         notificationsApi: _Notifications(), onlineBarrier: barrier)));
@@ -299,13 +302,15 @@ void main() {
     expect(dashboard.guardedReads, 1);
     final reader = find.byType(StudentNewsStorySheet);
     expect(reader, findsOneWidget);
-    final image = find.descendant(of: reader, matching:
-        find.byWidgetPredicate((widget) =>
-            widget is Image && widget.image is MemoryImage));
+    final image = find.descendant(of: reader, matching: find.byType(RawImage));
     expect(image, findsNothing);
     dashboard.cover.complete(bytes);
-    await tester.pumpAndSettle();
-    expect(image, findsWidgets);
+    for (var frame = 0; image.evaluate().isEmpty && frame < 100; frame++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump();
+    }
+    expect(tester.widget<RawImage>(image).image, isNotNull);
     expect(find.text('Story body stays visible'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -338,6 +343,29 @@ void main() {
     expect(tester.widget<StudentHomeView>(find.byType(StudentHomeView)).data.news.single.imageBytes, isNull);
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets('removed news cannot open after the pending cover check',
+      (tester) async {
+    final dashboard = _DelayedStoryDashboard()..markGate.complete();
+    final barrier = OnlineSideEffectBarrier(ownerIsCurrent: () => true);
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(
+        dashboardService: dashboard, promoService: _Promo(),
+        notificationsApi: _Notifications(), onlineBarrier: barrier)));
+    await tester.pumpAndSettle();
+    final pending = dashboard.imageValidationGate = Completer<void>();
+    await tester.tap(find.text('Cover on slow connection'));
+    await tester.pump();
+
+    dashboard.published = false;
+    await tester.widget<StudentHomeView>(find.byType(StudentHomeView)).onRefresh!();
+    await tester.pump();
+    expect(find.text('Cover on slow connection'), findsNothing);
+    pending.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(StudentNewsStorySheet), findsNothing);
+    expect(dashboard.writes, 0);
+    expect(dashboard.guardedReads, 0);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets('opening cached story revalidates bytes shown on the home card', (tester) async {
     final events = StreamController<AuthState>.broadcast(sync: true);
     final session = fakeSession('story-check');
@@ -365,6 +393,79 @@ void main() {
     expect(sheet.news.single.imageBytes, isNull);
     await tester.pumpWidget(const SizedBox());
     caps.dispose(); scope.dispose(); await events.close();
+  });
+  testWidgets('welcome story opens with a decoded cover before other frames',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final events = StreamController<AuthState>.broadcast(sync: true);
+    final session = fakeSession('welcome-first-frame');
+    final scope = AuthSessionScope(
+        currentSession: () => session, authEvents: events.stream);
+    events.add(AuthState(AuthChangeEvent.initialSession, session));
+    final caps = SessionCapabilities(scope);
+    expect(caps.grant(SessionCapabilityMode.cacheOnly,
+        caps.beginAuthorization(scope.capture()!)!), isTrue);
+    final cover = base64Decode(_coverPng);
+    final content = _Content(HomeContentSnapshot([{
+      'id': 'welcome-fixture',
+      'title': 'Новое приложение',
+      'subtitle': 'Добро пожаловать',
+      'body': 'Текст приветствия',
+      'published_at': '2026-07-22T12:00:00Z',
+      'created_at': '2026-07-22T12:00:00Z',
+      'variant': 'imageOverlay',
+      'image_path': 'news/fixture/welcome.png',
+      '_offline_image': 'welcome-fixture',
+    }], {'welcome-fixture': cover}), const HomeContentSnapshot([], {}));
+    final dashboard = _Dashboard();
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(
+        dashboardService: dashboard,
+        cachedReader: _Reader(caps),
+        homeContent: content,
+        homeContentCapabilities: caps)));
+    await _waitForNewsFrame(tester, 'Новое приложение');
+    final card = find.byType(StudentHomeNewsCard);
+    final homeProvider = tester.widget<StudentHomeNewsCard>(card).item.imageProvider;
+    expect(homeProvider, isNotNull);
+    final before = dashboard.imageValidationCalls;
+    await tester.tap(card);
+    final sheet = find.byType(StudentNewsStorySheet);
+    for (var frame = 0; sheet.evaluate().isEmpty && frame < 100; frame++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump();
+    }
+    expect(sheet, findsOneWidget);
+    final hero = find.descendant(of: sheet, matching: find.byType(Image));
+    final rawImage = find.descendant(of: sheet, matching: find.byType(RawImage));
+    final readerProvider = tester.widget<Image>(hero).image as ResizeImage;
+    expect(readerProvider.width, 390);
+    expect((readerProvider.imageProvider as MemoryImage).bytes, orderedEquals(cover));
+    expect(tester.widget<RawImage>(rawImage).image, isNotNull);
+    expect(find.text('Добро пожаловать'), findsWidgets);
+    expect(find.text('22 июля 2026'), findsOneWidget);
+    expect(dashboard.imageValidationCalls, before + 1);
+
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Закрыть'));
+    await tester.pumpAndSettle();
+    final pending = dashboard.imageValidationGate = Completer<void>();
+    await tester.tap(card);
+    await tester.pump();
+    expect(sheet, findsNothing);
+    content.deny('news');
+    pending.complete();
+    await tester.pumpAndSettle();
+    expect(sheet, findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    caps.dispose();
+    scope.dispose();
+    content.dispose();
+    await events.close();
   });
   testWidgets('cold snapshot uses validated news bytes rather than preloaded bytes', (tester) async {
     final events = StreamController<AuthState>.broadcast(sync: true);

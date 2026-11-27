@@ -23,6 +23,7 @@ import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
 import 'package:student_platform/src/ui/home/home_promo_service.dart';
 import 'package:student_platform/src/ui/home/home_content_coordinator.dart';
 import 'package:student_platform/src/ui/home/home_content_verified_loader.dart';
+import 'package:student_platform/src/ui/home/home_frame_trace.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
@@ -32,7 +33,6 @@ import 'package:student_platform/src/ui/learning/tabs/chat/navigation/group_acti
 import 'package:student_platform/src/ui/navigation/main_tab_scope.dart';
 import 'package:student_platform/src/ui/notifications/notification_center_sheet.dart';
 import 'package:student_platform/src/ui/profile/profile_avatar_image.dart';
-import 'package:student_platform/src/ui/schedule/utils/msk_date.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen(
@@ -87,7 +87,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _promoLoadGeneration = 0;
   int _modeRevision = 0;
   int _contentLayoutVisit = 0;
-  int _promoMediaGeneration = 0;
   final Set<String> _shownPromosThisVisit = {};
   final Set<String> _recordedImpressionIds = {};
   final Map<String, GlobalKey> _promoKeys = {};
@@ -125,6 +124,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _onHomeActiveChanged() {
     if (widget.activeListenable?.value == true && mounted) {
       setState(_beginContentLayoutVisit);
+      if (_data != null && HomeFrameTrace.enabled) {
+        final trace = HomeFrameTrace();
+        trace.mark('home_tab_return', counts: _readyCounts(_data!));
+        trace.markNextRaster('home_tab_first',
+            current: () => mounted && widget.activeListenable?.value == true);
+      }
     }
     _queuePromoImpressions();
   }
@@ -176,12 +181,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         for (final item in items) item.copyWith(clearImageBytes: true),
       ];
 
-  void _presentDashboard(HomeDashboardData next) {
+  void _presentDashboard(HomeDashboardData next,
+      {PreparedHomePromos? promos}) {
     final used = next.news.map((item) => item.imageBytes).toSet();
     _newsCoverProviders.removeWhere((bytes, _) => !used.contains(bytes));
     setState(() {
       _data = next;
       _error = null;
+      if (promos != null) _applyPromos(promos);
     });
   }
 
@@ -265,13 +272,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_serviceInitialized) {
       _authScope?.removeListener(_onAuthScopeChanged);
       if (_ownsService) _service.dispose();
-      _data = null;
-      _newsCoverProviders.clear();
+      _resetVisibleSnapshot();
       _loadInFlight = null;
       _loadUserId = null;
+      _loadSessionId = null;
       _loadAuthScope = null;
       _promoLoadGeneration++;
-      _beginContentLayoutVisit();
     }
     _authScope = source;
     _authScope?.addListener(_onAuthScopeChanged);
@@ -306,15 +312,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     if (_authScope != null && owner == null) {
       setState(() {
-        _data = null;
-        _newsCoverProviders.clear();
-        _error = null;
-        _loading = true;
+        _resetVisibleSnapshot();
         _loadUserId = null;
+        _loadSessionId = null;
         _loadAuthScope = null;
         _loadInFlight = null;
         _promoLoadGeneration++;
-        _beginContentLayoutVisit();
       });
       return;
     }
@@ -363,21 +366,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_serviceInitialized || (!modeChanged && !serviceChanged)) return;
     if (modeChanged) {
       _modeRevision++;
-      _hiddenDoneAssignmentIds.clear();
-      _markingDoneAssignmentIds.clear();
       _inAppSub?.cancel();
       _inAppSub = widget.cachedReader == null
           ? InAppNotificationBus.instance.stream.listen(_onInAppEvent)
           : null;
-      _promoMediaGeneration++;
-      _promo = const HomePromoLoadResult(intentionallyEmpty: true);
       _unreadNotificationCount = 0;
-      _promoImageBytes.clear();
-      _promoIconBytes.clear();
-      _promoImageStates.clear();
-      _promoAssetIdentities.clear();
-      _promoKeys.clear();
-      _recordedImpressionIds.clear();
     }
     if (serviceChanged) {
       if (_ownsService) _service.dispose();
@@ -385,15 +378,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _service = widget.dashboardService ??
           HomeDashboardService(sessionScope: _authScope);
     }
-    _data = null;
-    _newsCoverProviders.clear();
-    _error = null;
-    _loading = true;
+    _resetVisibleSnapshot();
     _loadInFlight = null;
     _loadUserId = null;
+    _loadSessionId = null;
     _loadAuthScope = null;
     _promoLoadGeneration++;
-    _beginContentLayoutVisit();
     unawaited(_load());
   }
 
@@ -452,29 +442,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void>? _loadInFlight;
   String? _loadUserId;
+  String? _loadSessionId;
   AuthOperationScope? _loadAuthScope;
+  void _resetVisibleSnapshot() {
+    _data = null;
+    _newsCoverProviders.clear();
+    _error = null;
+    _loading = true;
+    _beginContentLayoutVisit();
+    _avatarPrecacheKey = null;
+    _applyPromos(const PreparedHomePromos(
+        promo: HomePromoLoadResult(intentionallyEmpty: true)));
+    _recordedImpressionIds.clear();
+    _promoKeys.clear();
+    _hiddenDoneAssignmentIds.clear();
+    _markingDoneAssignmentIds.clear();
+  }
+
   Future<void> _load() {
     final userId = _service.currentUserId;
-    final operationScope = _authScope?.capture();
+    final scope = _authScope;
+    final operationScope = scope?.capture();
+    final sessionId = operationScope == null
+        ? null
+        : scope?.bindingFor(operationScope, '${SupabaseConfig.url}/auth/v1')?.sessionId;
     if (_loadInFlight != null &&
         _loadUserId == userId &&
         _loadAuthScope == operationScope) return _loadInFlight!;
-    if (_loadUserId != userId) {
-      _data = null;
-      _newsCoverProviders.clear();
-      _error = null;
-      _beginContentLayoutVisit();
-      _avatarPrecacheKey = null;
-      _promo = const HomePromoLoadResult(intentionallyEmpty: true);
-      ++_promoMediaGeneration;
-      _promoAssetIdentities.clear();
-      _promoImageBytes.clear();
-      _promoIconBytes.clear();
-      _promoImageStates.clear();
-      _recordedImpressionIds.clear();
-      _promoKeys.clear();
+    if (_loadUserId != userId || _loadSessionId != sessionId) {
+      _resetVisibleSnapshot();
     }
     _loadUserId = userId;
+    _loadSessionId = sessionId;
     _loadAuthScope = operationScope;
     final work = _loadDashboard();
     _loadInFlight = work;
@@ -493,28 +492,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return work;
   }
 
-  Future<void> _showSavedHeader(CachedHomeScheduleReader reader,
-      Future<List<HomeNewsItem>> newsWork, bool Function() current,
-      List<HomeNewsItem> Function(List<HomeNewsItem>) permittedNews) async {
-    try {
-      final profile = await reader.readProfile();
-      final news = await newsWork;
-      if (profile == null || _data != null || !current()) return;
-      _presentDashboard(HomeDashboardData(
-        profile: profile,
-        scheduleDate: MskDate.today(),
-        todayLessons: const [],
-        assignments: const [],
-        news: permittedNews(news),
-        scheduleStatus: 'Открываем сохранённое расписание…',
-        assignmentsStatus: 'Открываем сохранённые задания…',
-      ));
-    } catch (_) {
-      // Optional early frame: the full cached dashboard owns error feedback.
-    }
-  }
-
   Future<void> _loadDashboard() async {
+    final trace = HomeFrameTrace();
     final reader = widget.cachedReader;
     if (reader != null) {
       final firstCoreFrame = _data == null;
@@ -608,46 +587,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
 
         if (!currentContext()) return;
+        final dashboardWork = reader.readDashboard();
         final newsWork = readNewsForDisplay();
-        final promoWork = readOptional('promo');
-        if (firstCoreFrame) {
-          unawaited(_showSavedHeader(
-              reader, newsWork, currentContext, permittedNews));
-        }
-        final snapshot = await reader.readDashboard();
-        final verifiedNews = await newsWork;
-        if (!currentContext()) return;
-        _presentDashboard(snapshot.withNews(
-            permittedNews(verifiedNews), loading: false));
-        final savedPromo = await promoWork;
-        if (!currentContext()) return;
-        final promos = <ManagedContentCard>[];
-        for (final row in savedPromo?.rows ?? <Map<String, dynamic>>[]) {
-          final card = ManagedContentCard.tryParseHomePromo(row);
-          if (card == null) continue;
-          final imageKey = row['_offline_image'];
-          final iconKey = row['_offline_icon'];
-          final image =
-              imageKey is String ? savedPromo!.images[imageKey] : null;
-          final icon = iconKey is String ? savedPromo!.images[iconKey] : null;
-          if (image != null) {
-            _promoAssetIdentities[card.id] = _promoIdentity(card);
-            _promoImageBytes[card.id] = image;
-            _promoImageStates[card.id] = ContentImageReady(image);
-          }
-          if (icon != null) _promoIconBytes[card.id] = icon;
-          promos.add(card);
-        }
-        setState(() {
-          _promo = HomePromoLoadResult(
-              cards: promos, intentionallyEmpty: promos.isEmpty);
-          _loading = false;
-          _error = null;
+        final promoWork = readOptional('promo').then((saved) async {
+          trace.mark('offline_promo_read', counts: {
+            'savedFiles': saved?.images.length ?? 0,
+          });
+          if (saved == null || !currentContent()) return null;
+          final candidate = PreparedHomePromos.fromSnapshot(saved);
+          if (candidate == null) return null;
+          final prepared = await _preparePromos(candidate);
+          trace.mark('offline_promo_decoded', counts: {
+            'covers': prepared.images.length, 'icons': prepared.icons.length,
+          });
+          return prepared;
         });
+        final snapshot = await dashboardWork;
+        trace.mark('offline_core_read');
+        final verifiedNews = await newsWork;
+        final promos = await promoWork;
+        if (!currentContext()) return;
+        _presentDashboard(
+            snapshot.withNews(permittedNews(verifiedNews), loading: false),
+            promos: currentContent() ? promos : null);
+        _loading = false;
+        if (firstCoreFrame) {
+          trace.mark('offline_home_ready', counts: _readyCounts(_data!));
+          trace.markNextRaster('offline_home_first', current: () =>
+              currentContext() && widget.activeListenable?.value != false);
+        }
       } catch (error) {
         if (!mounted || widget.cachedReader != reader) return;
         setState(() {
-          _data = null;
           _loading = false;
           _error = error;
         });
@@ -658,13 +629,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final onlineBarrier = widget.onlineBarrier;
     if (onlineBarrier != null && onlineBarrier.isOpen) {
       unawaited(_service.prewarmSchedule(onlineBarrier));
-      final content = widget.homeContent;
-      if (content != null) {
-        for (final section in HomeContentSection.values) {
-          unawaited(
-              content.warm(section, onlineBarrier).catchError((Object _) {}));
-        }
-      }
     }
     var reportedFirstContent = false;
     final userId = _service.currentUserId;
@@ -677,17 +641,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final promoGeneration = ++_promoLoadGeneration;
+    final owner = _loadAuthScope;
+    final scope = _authScope;
     final coverRevision = PublicNewsImageCache.shared.invalidations.value;
     bool current() => mounted &&
         promoGeneration == _promoLoadGeneration &&
-        _service.currentUserId == userId;
+        _service.currentUserId == userId &&
+        identical(scope, _authScope) &&
+        (scope == null || (owner != null && scope.isCurrent(owner))) &&
+        (onlineBarrier == null || onlineBarrier.isOpen);
+    final cachedPromos = hadData
+        ? Future<PreparedHomePromos?>.value(null)
+        : _restorePromos(current, trace);
     HomeDashboardData currentCovers(HomeDashboardData data) =>
         PublicNewsImageCache.shared.invalidations.value == coverRevision
             ? data
             : _withoutNewsCovers(data);
     HomeDashboardData? pending;
     Future<void>? firstPaint;
-    void commit(HomeDashboardData data) {
+    void commit(HomeDashboardData data, {PreparedHomePromos? promos}) {
       if (!current()) return;
       if (!reportedFirstContent &&
           (!kReleaseMode || const bool.fromEnvironment('STARTUP_TRACE'))) {
@@ -695,35 +667,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         debugPrint(
             '[home-perf] first partial data ${firstContentClock.elapsedMilliseconds}ms');
       }
-      _presentDashboard(currentCovers(data));
+      _presentDashboard(currentCovers(data), promos: promos);
       _warmProfileAvatar(data.profile);
+    }
+
+    void refreshOptionalContent() {
+      if (!current()) return;
+      final content = widget.homeContent;
+      if (content != null && onlineBarrier != null) {
+        unawaited(content.warm(HomeContentSection.news, onlineBarrier)
+            .catchError((Object _) {}));
+      }
+      unawaited(_refreshPromo(current));
     }
 
     void offer(HomeDashboardData data) {
       if (!current()) return;
       pending = data;
-      if (_data != null || (firstPaint == null &&
-          !_firstCoverBytes(currentCovers(data)).any((bytes) => bytes != null))) {
+      if (_data != null) {
         commit(data);
         return;
       }
       firstPaint ??= () async {
+        trace.mark('home_core_ready');
         const budget = Duration(milliseconds: 600);
-        final clock = Stopwatch()..start();
-        while (current() && clock.elapsed < budget) {
-          final covers = _firstCoverBytes(currentCovers(pending!));
-          await _prepareFirstNewsCovers(covers, current, budget - clock.elapsed);
-          if (!current() ||
-              listEquals(covers, _firstCoverBytes(currentCovers(pending!)))) {
-            break;
+        final preparedNews = () async {
+          final clock = Stopwatch()..start();
+          while (current() && clock.elapsed < budget) {
+            final covers = _firstCoverBytes(currentCovers(pending!));
+            await _prepareFirstNewsCovers(covers, current, budget - clock.elapsed);
+            if (!current() ||
+                listEquals(covers, _firstCoverBytes(currentCovers(pending!)))) {
+              break;
+            }
           }
-        }
-        if (current()) commit(pending!);
+        }();
+        final promos = await cachedPromos;
+        await preparedNews;
+        trace.mark('home_cover_decode_complete');
+        if (!current()) return;
+        commit(pending!, promos: promos);
+        trace.mark('home_ready', counts: _readyCounts(_data!));
+        trace.markNextRaster('home_first', current: () =>
+            current() && widget.activeListenable?.value != false);
+        refreshOptionalContent();
       }();
     }
 
-    // Promo metadata/media must not wait for schedule, news or badge queries.
-    unawaited(_refreshPromo(promoGeneration));
+    if (hadData) refreshOptionalContent();
     unawaited(_refreshUnreadBadge());
     try {
       final next = await _service
@@ -751,51 +742,143 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _refreshPromo(int generation) async {
-    final userId = _service.currentUserId;
-    await _paintCachedPromo(generation);
-    if (!mounted ||
-        widget.cachedReader != null ||
-        generation != _promoLoadGeneration ||
-        userId != _service.currentUserId) return;
-    final promo = await _loadPromoSafe();
-    if (!mounted ||
-        generation != _promoLoadGeneration ||
-        userId != _service.currentUserId) return;
-    setState(() => _promo = promo);
-    await _hydratePromoMedia(promo);
-  }
-
-  Future<HomePromoLoadResult> _loadPromoSafe() async {
+  Future<PreparedHomePromos?> _restorePromos(
+      bool Function() current, HomeFrameTrace trace) async {
+    Future<PreparedHomePromos> decode(PreparedHomePromos promo) async {
+      trace.mark('promo_disk_read', counts: {
+        'covers': promo.images.length, 'icons': promo.icons.length,
+      });
+      final prepared = await _preparePromos(promo);
+      trace.mark('promo_decoded', counts: {
+        'covers': prepared.images.length, 'icons': prepared.icons.length,
+      });
+      return prepared;
+    }
     try {
-      return await _promoService.load().timeout(const Duration(seconds: 12));
-    } catch (error) {
-      debugPrint('[home] promo load failed: $error');
-      // Hard errors: last-good cache only. Demo only when RPC is truly missing
-      // (handled inside service) — never treat permission/DB failures as demo.
-      final cached = await _promoService.loadCached();
-      if (cached.cards.isNotEmpty) {
-        return HomePromoLoadResult(cards: cached.cards, loadError: true);
-      }
-      return const HomePromoLoadResult(
-          loadError: true, intentionallyEmpty: true);
+      return await (() async {
+        final content = widget.homeContent;
+        final barrier = widget.onlineBarrier;
+        if (content != null && barrier != null) {
+          final saved = await content.readOnline('promo', barrier);
+          if (!current() || content.isDenied('promo') || saved == null) return null;
+          final candidate = PreparedHomePromos.fromSnapshot(saved);
+          return candidate == null ? null : decode(candidate);
+        }
+        final cached = await _promoService.loadCached();
+        if (!current() || cached.isDemoFallback) return null;
+        final stored = await _collectPromoMedia(cached, current, local: true);
+        return current() ? decode(stored) : null;
+      })().timeout(const Duration(seconds: 2), onTimeout: () => null);
+    } catch (_) {
+      return null;
     }
   }
 
-  Future<void> _paintCachedPromo(int generation) async {
-    final userId = _service.currentUserId;
+  Future<void> _refreshPromo(bool Function() current) async {
+    Future<PreparedHomePromos?> prepare(PreparedHomePromos candidate) async {
+      if (!current()) return null;
+      final ready = await _preparePromos(candidate);
+      final complete = ready.promo.cards.every((card) {
+        final payload = card.homePromo;
+        final needsImage = contentCardVariantUsesImage(
+            effectiveContentCardVariant(payload.cardVariant));
+        return (!needsImage || ready.images.containsKey(card.id)) &&
+            ((payload.iconAssetId?.trim().isEmpty ?? true) ||
+                ready.icons.containsKey(card.id));
+      });
+      return current() && complete ? ready : null;
+    }
+
     try {
-      final cached = await _promoService.loadCached();
-      if (!mounted ||
-          generation != _promoLoadGeneration ||
-          userId != _service.currentUserId ||
-          (cached.card == null && !cached.intentionallyEmpty)) {
-        return;
+      final content = widget.homeContent;
+      final barrier = widget.onlineBarrier;
+      PreparedHomePromos? next;
+      if (content != null && barrier != null) {
+        next = await content.refreshPromo(barrier, prepare: prepare,
+            onVisibleIds: (ids) {
+          if (!current() || _promo.cards.every((card) => ids.contains(card.id))) {
+            return;
+          }
+          final cards = _promo.cards.where((card) => ids.contains(card.id)).toList();
+          setState(() => _applyPromos(PreparedHomePromos(
+                promo: HomePromoLoadResult(cards: cards, intentionallyEmpty: cards.isEmpty),
+                images: Map.of(_promoImageBytes)..removeWhere((id, _) => !ids.contains(id)),
+                icons: Map.of(_promoIconBytes)..removeWhere((id, _) => !ids.contains(id)),
+              )));
+        });
+      } else {
+        final promo = await _promoService.load().timeout(const Duration(seconds: 12));
+        if (!current() || promo.loadError) return;
+        next = await prepare(await _collectPromoMedia(promo, current));
       }
-      setState(() => _promo = cached);
-      unawaited(_hydratePromoMedia(cached));
-    } catch (_) {}
+      final ready = next;
+      if (!current() || ready == null) return;
+      setState(() => _applyPromos(ready));
+      _queuePromoImpressions();
+    } catch (_) {
+      // Keep the rendered snapshot through temporary transport failures.
+    }
   }
+
+  Future<PreparedHomePromos> _preparePromos(PreparedHomePromos promos) =>
+      promos.prepareImages(context).timeout(const Duration(milliseconds: 800),
+          onTimeout: () => PreparedHomePromos(promo: promos.promo));
+
+  Future<PreparedHomePromos> _collectPromoMedia(
+      HomePromoLoadResult promo, bool Function() current, {bool local = false}) async {
+    final images = <String, Uint8List>{};
+    final icons = <String, Uint8List>{};
+    Future<void> fetch(String? id, String version, String cardId,
+        Map<String, Uint8List> target) async {
+      if (id == null || id.trim().isEmpty || !current()) return;
+      try {
+        final bytes = local
+            ? await _contentMedia.readCachedBytes(id, contentVersion: version)
+            : await _contentMedia.fetchBytes(id, contentVersion: version);
+        if (current() && bytes != null && bytes.isNotEmpty) target[cardId] = bytes;
+      } catch (_) {}
+    }
+
+    for (var offset = 0; current() && offset < promo.cards.length; offset += 2) {
+      await Future.wait([
+        for (final card in promo.cards.skip(offset).take(2)) ...[
+          if (contentCardVariantUsesImage(
+              effectiveContentCardVariant(card.homePromo.cardVariant)))
+            fetch(card.homePromo.imageAssetId, '${card.id}|${card.schemaVersion}',
+                card.id, images),
+          fetch(card.homePromo.iconAssetId, '${card.id}|${card.schemaVersion}|icon',
+              card.id, icons),
+        ],
+      ]);
+    }
+    return PreparedHomePromos(promo: promo, images: images, icons: icons);
+  }
+
+  void _applyPromos(PreparedHomePromos prepared) {
+    _promo = prepared.promo;
+    _promoAssetIdentities
+      ..clear()
+      ..addEntries(_promo.cards.map((card) => MapEntry(card.id, _promoIdentity(card))));
+    _promoImageBytes
+      ..clear()
+      ..addAll(prepared.images);
+    _promoIconBytes
+      ..clear()
+      ..addAll(prepared.icons);
+    _promoImageStates
+      ..clear()
+      ..addEntries(prepared.images.entries
+          .map((image) => MapEntry(image.key, ContentImageReady(image.value))));
+  }
+
+  Map<String, int> _readyCounts(HomeDashboardData data) => {
+        'profile': data.profile.id.isEmpty ? 0 : 1,
+        'schedule': data.todayLessons.length,
+        'assignments': data.assignments.length,
+        'newsCovers': _firstCoverBytes(data).whereType<Uint8List>().length,
+        'promoCovers': _promoImageBytes.length,
+        'promoIcons': _promoIconBytes.length,
+      };
 
   void _warmProfileAvatar(HomeUserProfile profile) {
     final uid = _service.currentUserId;
@@ -853,7 +936,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onPressed: _load,
               child: const Text('Не всё удалось обновить. Повторить')),
         Expanded(
-          child: NotificationListener<ScrollNotification>(
+          child: MediaQuery.removePadding(
+            context: context,
+            removeTop: widget.cachedReader != null,
+            child: NotificationListener<ScrollNotification>(
             onNotification: (_) {
               _queuePromoImpressions();
               return false;
@@ -903,6 +989,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   : () => _onHomePromoDismiss(_promo.card!),
               hiddenAssignmentIds: _hiddenDoneAssignmentIds,
               markingDoneAssignmentIds: _markingDoneAssignmentIds,
+            ),
             ),
           ),
         ),
@@ -1236,9 +1323,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  bool _openingNewsStory = false;
+
   Future<void> _showNewsFeed(List<HomeNewsItem> news, int initialIndex,
       {required String? userId, required AuthOperationScope? owner}) async {
-    if (!_cachedContentAllowed || news.isEmpty) return;
+    if (_openingNewsStory || !_cachedContentAllowed || news.isEmpty) return;
     final service = _service;
     final scope = _authScope;
     if (service.currentUserId != userId ||
@@ -1249,16 +1338,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final contentCaps = widget.homeContentCapabilities;
     final contentPermit = _contentPermit;
     final byId = {for (final item in news) item.id: item};
-    // Each page checks its own image. The rest of the carousel cannot delay
-    // the tap or restore copies the user has already removed.
     final presentation = _presentationNews(
         news.map((item) => item.copyWith(clearImageBytes: true)).toList());
     final safeIndex = initialIndex.clamp(0, presentation.length - 1);
-    final active = ValueNotifier<bool>(true);
+    final initial = news[safeIndex];
     final navigator = Navigator.of(context);
-    ModalBottomSheetRoute<void>? sheetRoute;
+    final coverChanges = PublicNewsImageCache.shared.invalidations;
+    final coverRevision = coverChanges.value;
     bool current() =>
         mounted &&
+        navigator.mounted &&
+        _data?.news.any((item) => item.id == initial.id) == true &&
         identical(_service, service) &&
         service.currentUserId == userId &&
         identical(widget.cachedReader, reader) &&
@@ -1270,6 +1360,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         (barrier == null || barrier.isOpen) &&
         (scope == null || (owner != null && scope.isCurrent(owner))) &&
         content?.isDenied('news') != true;
+    bool coverCurrent() => current() && coverChanges.value == coverRevision;
+    Future<Uint8List?> localCover(HomeNewsItem source) async {
+      if (!source.usesImage || !coverCurrent()) return null;
+      try {
+        final validated = await service
+            .validateNewsImages([source])
+            .timeout(const Duration(seconds: 1), onTimeout: () => []);
+        return coverCurrent() ? validated.firstOrNull?.imageBytes : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // Only the tapped story waits for its local file and first decode. No
+    // signing or downloading is needed before the reader opens.
+    var initialPresentation = presentation;
+    final trace = HomeFrameTrace();
+    _openingNewsStory = true;
+    late final Future<Uint8List?> initialLocal;
+    try {
+      initialLocal = localCover(initial);
+      final verified = await initialLocal;
+      if (!current() || widget.activeListenable?.value == false) return;
+      trace.mark('story_cover_read',
+          counts: {'files': verified?.isNotEmpty == true ? 1 : 0});
+      if (verified != null && verified.isNotEmpty && coverCurrent()) {
+        final bytes = listEquals(initial.imageBytes, verified)
+            ? initial.imageBytes!
+            : verified;
+        final viewport = MediaQuery.of(context);
+        final readerWidth = (viewport.size.width * viewport.devicePixelRatio)
+            .ceil().clamp(288, 1440).toInt();
+        final provider = ResizeImage.resizeIfNeeded(
+            readerWidth, null, MemoryImage(bytes));
+        var decoded = true;
+        await precacheImage(provider, context, onError: (_, __) => decoded = false)
+            .timeout(const Duration(milliseconds: 600), onTimeout: () {
+          decoded = false;
+        });
+        if (!current() || widget.activeListenable?.value == false) return;
+        final prepared = decoded && coverCurrent();
+        if (prepared) {
+          final ready = presentation[safeIndex]
+              .copyWith(imageBytes: bytes, imageProvider: provider);
+          initialPresentation = List.of(presentation)..[safeIndex] = ready;
+        }
+        trace.mark('story_cover_decoded', counts: {'covers': prepared ? 1 : 0});
+      }
+    } finally {
+      _openingNewsStory = false;
+    }
+
+    final active = ValueNotifier<bool>(true);
+    ModalBottomSheetRoute<void>? sheetRoute;
+    var tracedFirstVisible = false;
     void check() {
       if (current()) return;
       void close() {
@@ -1311,35 +1456,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       builder: (_) {
         Widget sheet() => StudentNewsStorySheet(
-              news: presentation,
+              news: coverCurrent() ? initialPresentation : presentation,
               initialIndex: safeIndex,
               onPageChanged: reader == null ? (id) => mark(id) : null,
               onClosed: reader == null ? (id) => mark(id, closed: true) : null,
               resolveImage: (item) async {
-                if (!current()) return null;
+                if (!coverCurrent()) return null;
                 final source = byId[item.id];
                 if (source == null) return null;
-                final validated = await service
-                    .validateNewsImages([source])
-                    .timeout(const Duration(seconds: 1), onTimeout: () => []);
-                if (!current()) return null;
-                final bytes = validated.firstOrNull?.imageBytes;
+                final bytes = await (source == initial ? initialLocal : localCover(source));
+                if (!coverCurrent()) return null;
                 if (bytes != null || reader != null) return bytes;
                 final downloaded = barrier == null
                     ? await service.resolveNewsImageBytes(source)
                     : await service.resolveGuardedStoryImage(source, barrier,
-                        current: current);
-                return current() ? downloaded : null;
+                        current: coverCurrent);
+                return coverCurrent() ? downloaded : null;
               },
             );
         final changes = <Listenable>[
           active,
+          coverChanges,
           if (reader != null) reader.accessChanges,
           if (widget.homeContent != null) widget.homeContent!,
           if (contentCaps != null) contentCaps,
         ];
-        if (changes.isEmpty) return sheet();
-        return ListenableBuilder(
+        final readerView = ListenableBuilder(
             listenable: Listenable.merge(changes),
             builder: (_, __) => active.value &&
                     current() &&
@@ -1347,6 +1489,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     widget.homeContent?.isDenied('news') != true
                 ? sheet()
                 : const SizedBox.shrink());
+        final animation = sheetRoute?.animation;
+        if (!HomeFrameTrace.enabled || animation == null) return readerView;
+        return AnimatedBuilder(
+          animation: animation,
+          child: readerView,
+          builder: (_, child) {
+            if (!tracedFirstVisible && animation.value > 0 && current()) {
+              tracedFirstVisible = true;
+              trace.markNextRaster('story_first_visible',
+                  current: () => current() && sheetRoute?.isActive == true);
+            }
+            return child!;
+          },
+        );
       },
     );
     unawaited(navigator.push(sheetRoute));
@@ -1390,124 +1546,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ],
     );
-  }
-
-  Future<void> _hydratePromoMedia(HomePromoLoadResult promo) async {
-    final mediaUser = _service.currentUserId;
-    final generation = ++_promoMediaGeneration;
-    if (promo.hidePromoStrip || promo.isDemoFallback || promo.cards.isEmpty) {
-      if (!mounted ||
-          generation != _promoMediaGeneration ||
-          mediaUser != _service.currentUserId) return;
-      setState(() {
-        _promoImageBytes.clear();
-        _promoIconBytes.clear();
-        _promoImageStates.clear();
-      });
-      return;
-    }
-
-    // Mark image variants as loading until bytes arrive.
-    final loadingStates = <String, ContentImageRenderState>{};
-    for (final card in promo.cards) {
-      final usesImage = contentCardVariantUsesImage(
-        effectiveContentCardVariant(card.homePromo.cardVariant),
-      );
-      final identity = _promoIdentity(card);
-      if (_promoAssetIdentities[card.id] != identity) {
-        _promoImageBytes.remove(card.id);
-        _promoIconBytes.remove(card.id);
-      }
-      _promoAssetIdentities[card.id] = identity;
-      if (usesImage) {
-        final cached = _promoImageBytes[card.id];
-        loadingStates[card.id] = cached == null
-            ? ContentImageRenderState.loading
-            : ContentImageReady(cached);
-      } else {
-        loadingStates[card.id] = ContentImageRenderState.notApplicable;
-      }
-    }
-    if (mounted && generation == _promoMediaGeneration) {
-      setState(() => _promoImageStates
-        ..clear()
-        ..addAll(loadingStates));
-    }
-    _queuePromoImpressions();
-
-    Future<void> hydrate(ManagedContentCard card) async {
-      final version = '${card.id}|${card.schemaVersion}';
-      final imageId = card.homePromo.imageAssetId?.trim();
-      final iconId = card.homePromo.iconAssetId?.trim();
-      final usesImage = contentCardVariantUsesImage(
-        effectiveContentCardVariant(card.homePromo.cardVariant),
-      );
-
-      Future<void> image() async {
-        if (imageId != null && imageId.isNotEmpty && usesImage) {
-          Uint8List? bytes;
-          try {
-            bytes = await _contentMedia.fetchBytes(
-              imageId,
-              contentVersion: version,
-            );
-          } catch (_) {}
-          if (!mounted ||
-              generation != _promoMediaGeneration ||
-              mediaUser != _service.currentUserId) return;
-          setState(() {
-            if (bytes != null && bytes.isNotEmpty) {
-              _promoImageBytes[card.id] = bytes;
-              _promoImageStates[card.id] = ContentImageReady(bytes);
-            } else {
-              _promoImageBytes.remove(card.id);
-              _promoImageStates[card.id] = const ContentImageFailed();
-            }
-          });
-          _queuePromoImpressions();
-        } else if (usesImage) {
-          if (!mounted ||
-              generation != _promoMediaGeneration ||
-              mediaUser != _service.currentUserId) return;
-          setState(() {
-            _promoImageBytes.remove(card.id);
-            _promoImageStates[card.id] = ContentImageRenderState.missing;
-          });
-        }
-      }
-
-      Future<void> icon() async {
-        if (iconId != null && iconId.isNotEmpty) {
-          Uint8List? iconBytes;
-          try {
-            iconBytes = await _contentMedia.fetchBytes(
-              iconId,
-              contentVersion: '$version|icon',
-            );
-          } catch (_) {}
-          if (!mounted ||
-              generation != _promoMediaGeneration ||
-              mediaUser != _service.currentUserId) return;
-          if (iconBytes != null && iconBytes.isNotEmpty) {
-            setState(() => _promoIconBytes[card.id] = iconBytes!);
-          }
-        } else {
-          if (!mounted ||
-              generation != _promoMediaGeneration ||
-              mediaUser != _service.currentUserId) return;
-          setState(() => _promoIconBytes.remove(card.id));
-        }
-      }
-
-      await Future.wait([image(), icon()]);
-    }
-
-    for (var offset = 0; offset < promo.cards.length; offset += 2) {
-      if (!mounted ||
-          generation != _promoMediaGeneration ||
-          mediaUser != _service.currentUserId) return;
-      await Future.wait(promo.cards.skip(offset).take(2).map(hydrate));
-    }
   }
 
   List<StudentHomePromoPlacement> _promoPlacements() {
@@ -1671,8 +1709,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _onHomePromoDismiss(ManagedContentCard card) async {
     final modeRevision = _modeRevision;
+    final scope = _authScope;
+    final owner = _loadAuthScope;
+    final userId = _service.currentUserId;
     bool stillOnline() =>
-        mounted && widget.cachedReader == null && modeRevision == _modeRevision;
+        mounted && widget.cachedReader == null && modeRevision == _modeRevision &&
+        userId == _service.currentUserId && identical(scope, _authScope) &&
+        (scope == null || (owner != null && scope.isCurrent(owner)));
     if (!stillOnline()) return;
     if (widget.cachedReader != null) return;
     if (_promo.isDemoFallback) {
@@ -1695,10 +1738,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ? const HomePromoLoadResult(intentionallyEmpty: true)
             : HomePromoLoadResult(cards: remaining);
       });
-      final refreshed = await _loadPromoSafe();
-      if (!stillOnline()) return;
-      setState(() => _promo = refreshed);
-      unawaited(_hydratePromoMedia(refreshed));
+      await _refreshPromo(stillOnline);
     } catch (error) {
       if (!stillOnline()) return;
       ScaffoldMessenger.of(context).showSnackBar(

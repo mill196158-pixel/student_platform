@@ -30,6 +30,7 @@ import 'package:student_platform/src/ui/schedule/schedule_month_cache.dart';
 import 'package:student_platform/src/ui/schedule/schedule_prewarm.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/core/transport_failure.dart';
+import 'package:student_platform/src/ui/home/home_frame_trace.dart';
 
 class HomeDashboardService {
   HomeDashboardService({
@@ -156,6 +157,7 @@ class HomeDashboardService {
     void Function(HomeDashboardData)? onUpdate,
     HomeDashboardData? previous,
   }) async {
+    final trace = HomeFrameTrace();
     final revision = ++_loadRevision;
     final source = _sessionScope;
     if (source != null) await source.ready;
@@ -205,10 +207,15 @@ class HomeDashboardService {
     var reads = validPrevious?.readNotificationIds ?? <String>{};
     var news = validPrevious?.news ?? <HomeNewsItem>[];
     var initialNewsRead = validPrevious != null;
+    var initialSectionsRead = validPrevious != null;
     var newsLoading = validPrevious?.newsLoading ?? true;
     var actions = validPrevious?.groupActions ?? <HomeGroupActionPreview>[];
-    String? scheduleStatus = 'Загружаем расписание…';
-    String? assignmentsStatus = 'Загружаем ближайшие дела…';
+    String? scheduleStatus = validPrevious?.isScheduleForToday == true
+        ? validPrevious!.scheduleStatus
+        : 'Загружаем расписание…';
+    String? assignmentsStatus = validPrevious == null
+        ? 'Загружаем ближайшие дела…'
+        : validPrevious.assignmentsStatus;
     var scheduleFromCache = false;
     var assignmentsFromCache = false;
     var profileFromCache = false;
@@ -230,14 +237,15 @@ class HomeDashboardService {
         readNotificationIds: reads,
         groupActions: actions.take(4).toList());
     void publish() {
-      if (initialNewsRead && current()) onUpdate?.call(snapshot());
+      if (initialSectionsRead && initialNewsRead && current()) {
+        onUpdate?.call(snapshot());
+      }
     }
 
     var profileConfirmed = false;
     var scheduleConfirmed = false;
-    // Cache readers and server requests run independently. A slow schedule
-    // store cannot hold the signed-in header, and a late read cannot replace
-    // a section that already arrived from the server.
+    // Read the local sections together for the first frame. Server requests
+    // still run independently and a late local read cannot replace fresh data.
     final cacheReads = <Future<void>>[];
     if (validPrevious == null &&
         cache != null && cacheScope != null && userId != null) {
@@ -246,6 +254,9 @@ class HomeDashboardService {
         try {
           final saved = await cache.read(userId, section)
               .timeout(const Duration(seconds: 1), onTimeout: () => null);
+          trace.mark('home_local_${section.name}', counts: {
+            'rows': saved?.items.length ?? 0,
+          });
           if (saved == null || !current() || !cache.isCurrent(cacheScope)) return;
           apply(saved);
         } catch (_) {
@@ -282,9 +293,11 @@ class HomeDashboardService {
         }),
       ]);
     }
+    final localSections = Future.wait(cacheReads).then((_) {
+      initialSectionsRead = true;
+      publish();
+    });
 
-    // Profile and schedule requests start independently. First publication
-    // joins only the bounded local news read to include any saved covers.
     final profileWork = _loadProfile(
         isCurrent: current,
         fallback: profile.id == userId ? profile : null,
@@ -338,13 +351,15 @@ class HomeDashboardService {
             .catchError((Object _) => false));
       }
     }, onError: (Object error) {
-      assignmentsStatus = assignmentsFromCache
-          ? 'Сохранённые задания'
-          : 'Не удалось обновить задания';
+      if (validPrevious == null) {
+        assignmentsStatus = assignmentsFromCache
+            ? 'Сохранённые задания'
+            : 'Не удалось обновить задания';
+      }
       publish();
     });
     await Future.wait<void>([
-      ...cacheReads,
+      localSections,
       profileWork,
       assignmentsWork,
       _loadTodayLessons(scheduleDate).timeout(const Duration(seconds: 15)).then(
@@ -371,9 +386,11 @@ class HomeDashboardService {
               .catchError((Object _) => false));
         }
       }, onError: (Object error) {
-        scheduleStatus = scheduleFromCache
-            ? 'Сохранённое расписание'
-            : 'Не удалось обновить расписание';
+        if (validPrevious?.isScheduleForToday != true) {
+          scheduleStatus = scheduleFromCache
+              ? 'Сохранённое расписание'
+              : 'Не удалось обновить расписание';
+        }
         publish();
       }),
       _loadReadNotificationIds().then((value) {
@@ -386,6 +403,10 @@ class HomeDashboardService {
           isCurrent: current,
           onLocalReady: (value) {
             if (!current()) return;
+            trace.mark('home_local_news', counts: {
+              'rows': value.length,
+              'savedFiles': value.where((item) => item.imageBytes != null).length,
+            });
             initialNewsRead = true;
             news = value;
             publish();
@@ -403,9 +424,11 @@ class HomeDashboardService {
         publish();
       }, onError: (Object error) {
         if (!isTemporaryTransportFailure(error)) actions = [];
-        assignmentsStatus = assignmentsFromCache
-            ? 'Сохранённые задания'
-            : 'Не удалось обновить ближайшие дела';
+        if (validPrevious == null) {
+          assignmentsStatus = assignmentsFromCache
+              ? 'Сохранённые задания'
+              : 'Не удалось обновить ближайшие дела';
+        }
         publish();
       }),
     ]);

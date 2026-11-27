@@ -13,10 +13,13 @@ enum HomeContentLoadStatus { confirmed, denied, unavailable }
 
 class HomeContentLoadResult {
   const HomeContentLoadResult(this.status,
-      {this.rows = const [], this.media = const {}});
+      {this.rows = const [], this.media = const {}, this.livePromos = const []});
   final HomeContentLoadStatus status;
   final List<Map<String, dynamic>> rows;
   final Map<String, Uint8List> media;
+  // The server's validated actions remain in memory only. Saved rows omit
+  // actions and route targets because the same snapshot is readable offline.
+  final List<ManagedContentCard> livePromos;
 }
 
 /// Downloads a fresh, authorized snapshot; never reads the legacy caches and
@@ -29,7 +32,8 @@ class HomeContentVerifiedLoader {
       required this.owner,
       required this.barrier,
       required this.project,
-      required this.onAuthorizationDenial});
+      required this.onAuthorizationDenial,
+      this.onPromoIdsConfirmed});
   final SupabaseClient client;
   final http.Client httpClient;
   final AuthSessionScope scope;
@@ -40,6 +44,7 @@ class HomeContentVerifiedLoader {
   /// Persists quarantine under the captured owner, even if the barrier closes
   /// while the response is in flight. Must not dispatch a new network call.
   final Future<void> Function() onAuthorizationDenial;
+  final Future<bool> Function(Set<String>)? onPromoIdsConfirmed;
   bool get _current {
     try {
       final trusted = Uri.parse(SupabaseConfig.url);
@@ -80,6 +85,8 @@ class HomeContentVerifiedLoader {
         return const HomeContentLoadResult(HomeContentLoadStatus.unavailable);
       }
       final rows = <Map<String, dynamic>>[], media = <String, Uint8List>{};
+      final livePromos = <ManagedContentCard>[];
+      final mediaRequests = <List<(String, String)>>[];
       var totalBytes = 0;
       final ids = <String>{};
       for (final value in raw) {
@@ -130,6 +137,7 @@ class HomeContentVerifiedLoader {
                 HomeContentLoadStatus.unavailable);
           final image = card.homePromo.imageAssetId,
               icon = card.homePromo.iconAssetId;
+          livePromos.add(card);
           if (image != null && image.isNotEmpty)
             assets.add(('promo:$id:image', image));
           if (icon != null && icon.isNotEmpty)
@@ -149,7 +157,19 @@ class HomeContentVerifiedLoader {
             'payload': payload
           };
         }
-        for (final asset in assets) {
+        rows.add(safeRow);
+        mediaRequests.add(assets);
+      }
+      // Authoritative removals stay effective even if a different banner's
+      // media is temporarily unavailable. Validate the entire list first.
+      if (section == HomeContentSection.promo &&
+          onPromoIdsConfirmed != null &&
+          !await onPromoIdsConfirmed!(Set.unmodifiable(ids))) {
+        return const HomeContentLoadResult(HomeContentLoadStatus.unavailable);
+      }
+      for (var i = 0; i < rows.length; i++) {
+        final safeRow = rows[i];
+        for (final asset in mediaRequests[i]) {
           final fetched = await _fetch(section, asset.$2);
           if (!_current)
             return const HomeContentLoadResult(
@@ -174,10 +194,16 @@ class HomeContentVerifiedLoader {
               ? '_offline_icon'
               : '_offline_image'] = mediaKey;
         }
-        rows.add(safeRow);
       }
       return HomeContentLoadResult(HomeContentLoadStatus.confirmed,
-          rows: rows, media: media);
+          rows: rows, media: media, livePromos: livePromos);
+    } on PostgrestException catch (error) {
+      if (error.code == '42501' || error.code == 'PGRST301' ||
+          error.code == 'PGRST302') {
+        await barrier.trackTeardown(onAuthorizationDenial);
+        return const HomeContentLoadResult(HomeContentLoadStatus.denied);
+      }
+      return const HomeContentLoadResult(HomeContentLoadStatus.unavailable);
     } on FunctionException catch (error) {
       if (error.status == 401 || error.status == 403) {
         await barrier.trackTeardown(onAuthorizationDenial);

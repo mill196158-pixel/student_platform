@@ -15,6 +15,7 @@ import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/home/home_content_coordinator.dart';
+import 'package:student_platform/src/ui/home/home_promo_service.dart';
 import 'package:student_platform/src/ui/info/home_content_snapshot_store.dart';
 import 'package:student_platform/src/ui/home/home_content_verified_loader.dart';
 import 'package:student_platform/src/ui/home/home_dashboard_service.dart';
@@ -160,6 +161,126 @@ void main() {
     expect(result.rows.single['image_path'], 'private/path');
     expect(jsonEncode(result.rows), isNot(contains('secret')));
     expect(result.media[result.rows.single['_offline_image']], [1, 2, 3]);
+  });
+
+  test('promo keeps the verified saved frame until a replacement is ready',
+      () async {
+    if (Platform.isWindows) {
+      open.overrideFor(
+          OperatingSystem.windows, () => DynamicLibrary.open('winsqlite3.dll'));
+    }
+    sqfliteFfiInit();
+    final dir = await Directory.systemTemp.createTemp('home-promo-frame-');
+    final db = await openHomeContentSnapshotDatabase('${dir.path}/content.db',
+        factory: databaseFactoryFfi);
+    addTearDown(() async {
+      await db.close();
+      await dir.delete(recursive: true);
+    });
+    final store = HomeContentSnapshotStore(
+        db: db,
+        scope: scope,
+        currentBinding: () => OfflineSessionBinding.fromSession(
+            Supabase.instance.client.auth.currentSession!,
+            '${SupabaseConfig.url}/auth/v1'),
+        project: SupabaseConfig.url);
+    final coordinator = HomeContentCoordinator(
+        store: store, scope: scope, httpClient: transport);
+    addTearDown(coordinator.dispose);
+    var currentTitle = 'Saved promo';
+    var includeRemoved = true;
+    var mediaUnavailable = false;
+    var deny = false;
+    var requestsForMedia = 0;
+    Map<String, dynamic> row(String id, String title) => {
+          'id': id,
+          'template_key': 'home_promo_v1',
+          'schema_version': 2,
+          'placement': 'home_promo',
+          'origin': 'admin',
+          'payload': {
+            'title': title,
+            'subtitle': 'Text',
+            'icon_key': 'psychology',
+            'gradient_colors': ['#FFFFFF', '#123456'],
+            'cta_label': 'Open',
+            'cta_route': '/my-diary',
+            'dismissible': true,
+            'card_variant': 'image_full',
+            'image_asset_id': 'image-a',
+            'icon_asset_id': 'icon-a',
+          },
+        };
+    handler = (request) async {
+      if (request.url.path.contains('/rpc/')) {
+        if (deny) {
+          return jsonResponse(request,
+              {'code': '42501', 'message': 'placement denied'}, 403);
+        }
+        return jsonResponse(request, [
+          row('promo-id', currentTitle),
+          if (includeRemoved) row('old-id', 'Removed promo'),
+        ]);
+      }
+      if (request.url.path.contains('/functions/')) {
+        requestsForMedia++;
+        if (mediaUnavailable) return http.Response('unavailable', 503);
+        final id = (jsonDecode(request.body) as Map)['assetId'];
+        return jsonResponse(
+            request, {'signedUrl': '${SupabaseConfig.url}/file/$id'});
+      }
+      return http.Response.bytes(
+          request.url.path.endsWith('icon-a') ? [2] : [1], 200,
+          request: request);
+    };
+
+    final live = await coordinator.refreshPromo(barrier);
+    expect(live?.promo.card?.homePromo.ctaRoute, '/my-diary');
+    expect(live?.images['promo-id'], [1]);
+    expect(live?.icons['promo-id'], [2]);
+    final saved = await coordinator.readOnline('promo', barrier);
+    expect(saved, isNotNull);
+    expect(requestsForMedia, 4, reason: 'first snapshot read is disk only');
+    final onDisk = PreparedHomePromos.fromSnapshot(saved!);
+    expect(onDisk?.promo.card?.homePromo.title, currentTitle);
+    expect(onDisk?.promo.card?.homePromo.ctaRoute, isNull);
+    expect(onDisk?.images['promo-id'], [1]);
+
+    currentTitle = 'Replacement';
+    final entered = Completer<void>();
+    final candidateReady = Completer<PreparedHomePromos?>();
+    final reload = coordinator.refreshPromo(barrier, prepare: (candidate) {
+      expect(candidate.promo.card?.homePromo.title, 'Replacement');
+      entered.complete();
+      return candidateReady.future;
+    });
+    await entered.future;
+    expect((await coordinator.readOnline('promo', barrier))!.rows, saved.rows);
+    candidateReady.complete(null);
+    expect(await reload, isNull);
+    expect((await coordinator.readOnline('promo', barrier))!.rows, saved.rows);
+
+    includeRemoved = false;
+    mediaUnavailable = true;
+    final mediaBefore = requestsForMedia;
+    Set<String>? confirmed;
+    expect(await coordinator.refreshPromo(barrier, onVisibleIds: (ids) {
+      expect(requestsForMedia, mediaBefore, reason: 'removal precedes download');
+      confirmed = ids;
+    }), isNull);
+    expect(confirmed, {'promo-id'});
+    final pruned = await coordinator.readOnline('promo', barrier);
+    expect(pruned?.rows, [saved.rows.first]);
+    expect(pruned?.images.length, 2);
+    expect(PreparedHomePromos.fromSnapshot(pruned!)?.images['promo-id'], [1]);
+
+    final closed = OnlineSideEffectBarrier(ownerIsCurrent: () => true)..close();
+    expect(await coordinator.readOnline('promo', closed), isNull);
+    deny = true;
+    expect(await coordinator.refreshPromo(barrier), isNull);
+    expect(coordinator.isDenied('promo'), isTrue);
+    expect(await store.readOnline('promo', barrier), isNull);
+    expect(await coordinator.readOnline('promo', barrier), isNull);
   });
   test('rejects wrong client and project before any requests', () async {
     var calls = 0;

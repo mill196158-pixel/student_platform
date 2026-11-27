@@ -294,7 +294,7 @@ void main() {
     });
   }
 
-  test('saved profile paints while unrelated disk reads and live profile wait',
+  test('first saved profile joins local sections while live profile waits',
       () async {
     SharedPreferences.setMockInitialValues({});
     final fresh = Completer<void>();
@@ -329,16 +329,18 @@ void main() {
       if (data.profile.name == 'Fresh owner' && !updated.isCompleted)
         updated.complete(data);
     });
+    await Future<void>.delayed(Duration.zero);
+    expect(saved.isCompleted, isFalse);
+    expect(fresh.isCompleted, isFalse);
+    cache.delayedSchedule.complete(null);
     expect(
         (await saved.future.timeout(const Duration(milliseconds: 700)))
             .profile
             .id,
         'a');
-    expect(cache.delayedSchedule.isCompleted, isFalse);
     expect(fresh.isCompleted, isFalse);
     fresh.complete();
     await updated.future.timeout(const Duration(milliseconds: 700));
-    cache.delayedSchedule.complete(null);
     expect((await result).profile.name, 'Fresh owner');
   });
 

@@ -1,9 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../info/home_content_snapshot_store.dart';
 
 /// Result of dual-read Home promo load (Stage 14.1.4 multi-slot).
 ///
@@ -39,6 +42,74 @@ class HomePromoLoadResult {
       isDemoFallback || (card != null && card!.showDemoBadge);
 
   bool get hidePromoStrip => intentionallyEmpty && !isDemoFallback;
+}
+
+/// Promo placement metadata and matching image files from one verified read.
+class PreparedHomePromos {
+  const PreparedHomePromos({
+    required this.promo,
+    this.images = const {},
+    this.icons = const {},
+  });
+
+  final HomePromoLoadResult promo;
+  final Map<String, Uint8List> images;
+  final Map<String, Uint8List> icons;
+
+  static PreparedHomePromos? fromSnapshot(HomeContentSnapshot snapshot,
+      {List<ManagedContentCard>? liveCards}) {
+    if (liveCards != null && liveCards.length != snapshot.rows.length) {
+      return null;
+    }
+    final cards = <ManagedContentCard>[];
+    final images = <String, Uint8List>{};
+    final icons = <String, Uint8List>{};
+    for (var index = 0; index < snapshot.rows.length; index++) {
+      final row = snapshot.rows[index];
+      final card = liveCards?[index] ?? ManagedContentCard.tryParseHomePromo(row);
+      if (card == null || card.id != row['id']) {
+        if (liveCards != null) return null;
+        continue;
+      }
+      final usesImage = contentCardVariantUsesImage(
+        effectiveContentCardVariant(card.homePromo.cardVariant),
+      );
+      if (usesImage && (card.homePromo.imageAssetId?.isNotEmpty ?? false)) {
+        final key = row['_offline_image'];
+        final bytes = key is String ? snapshot.images[key] : null;
+        if (bytes != null && bytes.isNotEmpty) images[card.id] = bytes;
+      }
+      if (card.homePromo.iconAssetId?.isNotEmpty ?? false) {
+        final key = row['_offline_icon'];
+        final bytes = key is String ? snapshot.images[key] : null;
+        if (bytes != null && bytes.isNotEmpty) icons[card.id] = bytes;
+      }
+      cards.add(card);
+    }
+    return PreparedHomePromos(
+      promo: HomePromoLoadResult(
+          cards: List.unmodifiable(cards), intentionallyEmpty: cards.isEmpty),
+      images: Map.unmodifiable(images),
+      icons: Map.unmodifiable(icons),
+    );
+  }
+
+  /// Uses the same providers as `StudentHomePromoCard` and its custom icon.
+  Future<PreparedHomePromos> prepareImages(BuildContext context) async {
+    final invalid = <Uint8List>{};
+    await Future.wait([
+      for (final bytes in {...images.values, ...icons.values})
+        precacheImage(MemoryImage(bytes), context,
+            onError: (_, __) => invalid.add(bytes)),
+    ]);
+    if (invalid.isEmpty) return this;
+    return PreparedHomePromos(
+        promo: promo,
+        images: Map.unmodifiable(Map.of(images)
+          ..removeWhere((_, bytes) => invalid.contains(bytes))),
+        icons: Map.unmodifiable(Map.of(icons)
+          ..removeWhere((_, bytes) => invalid.contains(bytes))));
+  }
 }
 
 /// Thin RPC boundary for tests.

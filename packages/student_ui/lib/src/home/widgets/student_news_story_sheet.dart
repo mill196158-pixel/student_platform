@@ -41,6 +41,7 @@ class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
   late final PageController _controller;
   late int _index;
   late List<StudentHomeNews> _news;
+  final _resolving = <StudentHomeNews>{};
 
   @override
   void initState() {
@@ -77,29 +78,30 @@ class _StudentNewsStorySheetState extends State<StudentNewsStorySheet> {
   Future<void> _ensureImage(int index) async {
     if (index < 0 || index >= _news.length) return;
     final item = _news[index];
-    if (!item.usesImage) return;
-    Uint8List? bytes = item.imageBytes;
-    if ((bytes == null || bytes.isEmpty) && widget.resolveImage != null) {
-      try {
-        bytes = await widget.resolveImage!(item);
-      } catch (_) {
-        return;
-      }
-      if (!mounted ||
-          index >= _news.length ||
-          !identical(_news[index], item) ||
-          bytes == null ||
-          bytes.isEmpty) return;
+    final resolve = widget.resolveImage;
+    if (!item.usesImage ||
+        item.hasImage ||
+        resolve == null ||
+        !_resolving.add(item)) return;
+    bool current() =>
+        mounted && index < _news.length && identical(_news[index], item);
+    try {
+      final bytes = await resolve(item);
+      if (!current() || bytes == null || bytes.isEmpty) return;
+      final provider = MemoryImage(bytes);
+      var decoded = true;
+      await precacheImage(provider, context,
+          onError: (_, __) => decoded = false);
+      if (!current() || !decoded) return;
       setState(() {
-        _news[index] = item.copyWith(imageBytes: bytes);
+        _news[index] =
+            item.copyWith(imageBytes: bytes, imageProvider: provider);
       });
+    } catch (_) {
+      // Keep the text and the reserved cover area after a failed fetch.
+    } finally {
+      _resolving.remove(item);
     }
-    if (!mounted || bytes == null || bytes.isEmpty) return;
-    await precacheImage(
-      MemoryImage(bytes),
-      context,
-      onError: (_, __) {},
-    );
   }
 
   void _close() {
@@ -190,8 +192,8 @@ class _NewsStoryPage extends StatelessWidget {
         children: [
           _StoryHero(item: item),
           const SizedBox(height: 22),
-          if (item.variant == StudentHomeNewsVariant.imageOnly &&
-              item.hasImage) ...[
+          if (item.usesImage &&
+              item.variant != StudentHomeNewsVariant.imageOverlay) ...[
             Text(
               item.title,
               style: theme.textTheme.headlineSmall?.copyWith(
@@ -271,8 +273,7 @@ class _StoryHero extends StatelessWidget {
             : const Color(0xFF111827);
 
     final usesPhoto = item.usesImage && item.hasImage;
-    final showOverlay =
-        usesPhoto && item.variant == StudentHomeNewsVariant.imageOverlay;
+    final overlaysText = item.variant == StudentHomeNewsVariant.imageOverlay;
 
     // gradientText → decorative icon + text
     // imageOnly → full-bleed image, no overlays
@@ -290,9 +291,7 @@ class _StoryHero extends StatelessWidget {
               Positioned.fill(
                 child: NewsImageFrame(
                   bytes: item.imageBytes,
-                  imageProvider: item.imageBytes?.isNotEmpty == true
-                      ? null
-                      : item.imageProvider,
+                  imageProvider: item.imageProvider,
                   colors: colors,
                   alignment: item.imageFocus,
                   isLoading: false,
@@ -301,7 +300,7 @@ class _StoryHero extends StatelessWidget {
               )
             else
               Positioned.fill(child: _GradientBackground(colors: colors)),
-            if (showOverlay)
+            if (usesPhoto && overlaysText)
               Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -318,7 +317,7 @@ class _StoryHero extends StatelessWidget {
                   ),
                 ),
               ),
-            if (!usesPhoto) ...[
+            if (!usesPhoto)
               Positioned(
                 right: -24,
                 bottom: -24,
@@ -328,6 +327,7 @@ class _StoryHero extends StatelessWidget {
                   color: onGradient.withValues(alpha: 0.16),
                 ),
               ),
+            if (!item.usesImage)
               Padding(
                 padding: const EdgeInsets.all(24),
                 child: ConstrainedBox(
@@ -351,8 +351,7 @@ class _StoryHero extends StatelessWidget {
                   ),
                 ),
               ),
-            ],
-            if (showOverlay)
+            if (overlaysText)
               Padding(
                 padding: const EdgeInsets.all(24),
                 child: ConstrainedBox(
@@ -360,7 +359,10 @@ class _StoryHero extends StatelessWidget {
                   child: Align(
                     alignment: Alignment.bottomLeft,
                     heightFactor: 1,
-                    child: _StoryCaption(item: item, color: Colors.white),
+                    child: _StoryCaption(
+                      item: item,
+                      color: usesPhoto ? Colors.white : onGradient,
+                    ),
                   ),
                 ),
               ),

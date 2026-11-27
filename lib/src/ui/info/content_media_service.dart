@@ -158,6 +158,29 @@ class ContentMediaService {
     }
   }
 
+  /// Reads a local copy with a still-valid cached grant. Never requests a URL.
+  Future<Uint8List?> readCachedBytes(String assetId,
+      {String? contentVersion}) async {
+    if (assetId.trim().isEmpty || _userScope == 'anon') return null;
+    final key = cacheKey(assetId, contentVersion: contentVersion);
+    final epoch = _epoch;
+    final assetEpoch = _assetEpochs[key];
+    bool current() => epoch == _epoch && assetEpoch == _assetEpochs[key] &&
+        key == cacheKey(assetId, contentVersion: contentVersion);
+    try {
+      final grant = _memoryUrls[key] ?? await _readPersistedUrl(key);
+      if (!current() || grant == null || grant.isExpired) return null;
+      final memory = _bytesMemory[key];
+      if (memory != null) return memory;
+      if (!persistBytes) return null;
+      final bytes = await _disk.peek(NewsImageCacheKey(
+          path: 'content-media/$key', version: 'asset-v1'));
+      return current() && !grant.isExpired ? bytes : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Single-flight byte fetch keyed by [cacheKey].
   Future<Uint8List?> fetchBytes(
     String assetId, {

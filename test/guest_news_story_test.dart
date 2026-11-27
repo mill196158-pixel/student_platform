@@ -164,17 +164,20 @@ void main() {
       expect(find.text('Полный текст первой новости'), findsOneWidget);
       expect(find.text('Что нового'), findsOneWidget);
       final png = base64Decode(
-          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==');
+          'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGPUmtvPgA0wYRUdtBIADzYBZqSxVuUAAAAASUVORK5CYII=');
       service.imageReady.complete(png);
-      await tester.pumpAndSettle();
+      final image = find.descendant(
+          of: find.byType(StudentNewsStorySheet),
+          matching: find.byType(RawImage));
+      for (var frame = 0; image.evaluate().isEmpty && frame < 100; frame++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 5)));
+        await tester.pump();
+      }
       final sheet = tester
           .widget<StudentNewsStorySheet>(find.byType(StudentNewsStorySheet));
       expect(sheet.news.first.id, 'one');
-      expect(
-          find.descendant(
-              of: find.byType(StudentNewsStorySheet),
-              matching: find.byType(Image)),
-          findsWidgets);
+      expect(tester.widget<RawImage>(image).image, isNotNull);
       await tester.drag(
           find.descendant(
               of: find.byType(StudentNewsStorySheet),

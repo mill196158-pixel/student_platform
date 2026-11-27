@@ -878,10 +878,12 @@ Home no longer waits for an aggregate dashboard before painting. Profile, schedu
 
 Home refreshes coalesce within an account only, with an 18-second attempt deadline and generation invalidation. A stuck attempt releases retry; news/profile/promo reads have 12-second limits, schedule/assignment/deadline work 15 seconds. These are upper bounds on stalled work, not normal display delays. Late callbacks from old attempts/accounts cannot replace current content. Optional strict repository reads keep the Home error state instead of treating a failed fetch as empty.
 
-After a verified offline admission, the saved Home header can paint before
-schedule, assignments, and news have finished reading their snapshots. In an
-online session the Home cache reads also complete independently, and a late
-cache section cannot replace a newer live section.
+After admission, Home joins the bounded local profile, schedule, assignment,
+news, and promotional snapshots before its first dashboard frame. The ordinary
+iOS route reads verified promotional metadata and images from the scoped Home
+SQLite store. The offline route uses the same prepared presentation with its
+own cached-read permit. An authorized saved promotional image does not need a
+new signed URL to appear. Session admission still precedes protected content.
 
 The signed-in Home checks the account's saved news before its initial dashboard
 frame. Local seed and decode each have a time limit. The first four cached
@@ -894,6 +896,12 @@ same publication and image path can retain a proven cover while verifying a
 new revision. Server denial, permission change and manual cache clearing release
 the corresponding cached snapshot. The guest feed keeps its existing placement
 behavior. Each section still follows its publication and session checks.
+
+The existing ready promo snapshot remains during replacement downloads and
+decode. A successful placement listing removes unlisted IDs before asset
+downloads. The remaining verified cards stay visible through temporary media
+errors. The committed replacement contains the prepared card images and icons.
+Live-only navigation remains subject to the online route and session policy.
 
 Profile settings show the size of the replaceable image cache when measured
 and offer one clear action. This action preserves conversations, drafts,

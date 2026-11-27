@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:sqflite/sqflite.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
+import 'package:student_platform/src/core/online_side_effect_barrier.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 
 /// Independent QA database: no migration or import from unscoped caches.
@@ -216,6 +217,55 @@ class HomeContentSnapshotStore {
     }
   }
 
+  /// A fresh placement response establishes which previous promos may still
+  /// be shown while replacement media is being prepared. Retain their existing
+  /// asset bytes and remove only rows excluded by that response.
+  Future<bool> retainPromoIds(HomeContentTicket t, Set<String> visibleIds) async {
+    if (t.section != 'promo' || !_current(t)) return false;
+    try {
+      return await db.transaction((txn) async {
+        if (!_current(t)) throw const _Stale();
+        final args = _args(t.binding, t.section);
+        final rows = await txn.query('home_content',
+            columns: ['payload', 'denied'],
+            where: '$_where AND seq=?',
+            whereArgs: [...args, t.sequence]);
+        if (rows.length != 1 || !_current(t)) throw const _Stale();
+        final previous = rows.single;
+        if (previous['denied'] != 0 || previous['payload'] == null) return true;
+        List? payload;
+        try {
+          final decoded = jsonDecode(previous['payload'] as String);
+          if (decoded is List) payload = decoded;
+        } on FormatException {
+          // A corrupt payload is already unreadable and can be replaced.
+        }
+        if (payload == null) return true;
+        final kept = payload
+            .whereType<Map>()
+            .where((row) => visibleIds.contains(row['id']))
+            .toList();
+        if (kept.length == payload.length) return true;
+        final assets = {
+          for (final row in kept)
+            for (final key in ['_offline_image', '_offline_icon'])
+              if (row[key] case final String asset) asset,
+        };
+        await txn.update('home_content', {'payload': jsonEncode(kept)},
+            where: '$_where AND seq=?', whereArgs: [...args, t.sequence]);
+        final retainedAssets = assets.isEmpty
+            ? ''
+            : ' AND asset NOT IN (${List.filled(assets.length, '?').join(',')})';
+        await txn.delete('home_content_image',
+            where: '$_where$retainedAssets', whereArgs: [...args, ...assets]);
+        if (!_current(t)) throw const _Stale();
+        return true;
+      });
+    } on _Stale {
+      return false;
+    }
+  }
+
   Future<HomeContentSnapshot?> read(
       String section, SessionCapabilities caps) async {
     final permit = caps.capture(SessionCapability.cachedRead);
@@ -235,8 +285,28 @@ class HomeContentSnapshotStore {
         () =>
             caps.mode == SessionCapabilityMode.cacheOnly &&
             caps.permits(permit, SessionCapability.cachedRead));
+    return _readBound(section, binding, valid);
+  }
+
+  /// Reads a previously verified snapshot inside an authorised online route.
+  /// An open barrier and the captured session must remain valid across I/O.
+  Future<HomeContentSnapshot?> readOnline(String section,
+      OnlineSideEffectBarrier barrier) async {
+    final owner = scope.capture();
+    final binding = currentBinding();
+    if (owner == null ||
+        binding == null ||
+        !const {'news', 'promo'}.contains(section) ||
+        owner.userId != binding.userId ||
+        binding.issuer != '$project/auth/v1') return null;
+    bool valid() => _valid(owner, binding, () => barrier.isOpen);
+    return _readBound(section, binding, valid);
+  }
+
+  Future<HomeContentSnapshot?> _readBound(String section,
+      OfflineSessionBinding binding, bool Function() valid) async {
     if (!valid()) return null;
-    return db.transaction((txn) async {
+    final snapshot = await db.transaction((txn) async {
       final args = _args(binding, section);
       final rows = await txn.rawQuery(
           'SELECT denied, length(CAST(payload AS BLOB)) AS payload_size '
@@ -302,5 +372,6 @@ class HomeContentSnapshotStore {
         return null;
       }
     });
+    return valid() ? snapshot : null;
   }
 }

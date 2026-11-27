@@ -218,14 +218,20 @@ void main() {
             'Visible paragraph $body');
         final story = find.byType(StudentNewsStorySheet);
         expect(find.textContaining(' из 27'), findsOneWidget);
+        final hero = find.descendant(of: story, matching: find.byType(Image));
+        bool decodedCover(Image image) {
+          final provider = image.image;
+          final source = provider is ResizeImage ? provider.imageProvider : provider;
+          if (source is! MemoryImage ||
+              base64Encode(source.bytes) != base64Encode(_covers[color]!)) {
+            return false;
+          }
+          final rendered = find.descendant(
+              of: find.byWidget(image), matching: find.byType(RawImage));
+          return tester.widgetList<RawImage>(rendered).any((raw) => raw.image != null);
+        }
         await until(
-            () => tester
-                .widgetList<Image>(
-                    find.descendant(of: story, matching: find.byType(Image)))
-                .where((w) => w.image is MemoryImage)
-                .any((w) =>
-                    base64Encode((w.image as MemoryImage).bytes) ==
-                    base64Encode(_covers[color]!)),
+            () => tester.widgetList<Image>(hero).any(decodedCover),
             'Story cover $color');
         await close();
       }

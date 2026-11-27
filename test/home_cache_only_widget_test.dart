@@ -104,7 +104,8 @@ void main() {
     expect(promo.calls, 0);
     expect(notifications.calls, 0);
     expect(promo.events, isEmpty);
-    expect(media.requested, isEmpty);
+    expect(media.diskRequests, isEmpty);
+    expect(media.networkRequests, isEmpty);
     final view = tester.widget<StudentHomeView>(find.byType(StudentHomeView));
     expect(view.onAssignmentDoneTap, isNull);
     expect(view.onNotificationsTap, isNull);
@@ -130,6 +131,7 @@ void main() {
     await tester.pump();
     expect(dashboard.requests.length, 1);
     dashboard.updates.first(partial('a', 'Первый онлайн'));
+    await tester.pump();
     await tester.pump();
     final oldHelp =
         tester.widget<StudentHomeView>(find.byType(StudentHomeView)).onHelpTap;

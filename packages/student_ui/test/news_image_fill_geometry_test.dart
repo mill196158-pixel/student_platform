@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -146,6 +147,42 @@ void main() {
     expect(tester.widget<Image>(image).fit, BoxFit.cover);
     expect(find.byIcon(Icons.folder_copy_outlined), findsNothing);
     expect(find.text('Заголовок'), findsOneWidget);
+  });
+
+  testWidgets('story keeps text positions while the missing cover decodes', (
+    tester,
+  ) async {
+    final item = _news(
+      variant: StudentHomeNewsVariant.imageOnly,
+      imageBytes: png,
+    ).copyWith(clearImageBytes: true);
+    final pending = Completer<Uint8List?>();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+          body: StudentNewsStorySheet(
+        news: [item],
+        resolveImage: (_) => pending.future,
+      )),
+    ));
+
+    final title = find.text(item.title);
+    final body = find.text(item.body);
+    expect(title, findsOneWidget);
+    final initialTitle = tester.getTopLeft(title);
+    final initialBody = tester.getTopLeft(body);
+    expect(find.byType(RawImage), findsNothing);
+
+    pending.complete(png);
+    for (var frame = 0;
+        find.byType(RawImage).evaluate().isEmpty && frame < 100;
+        frame++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump();
+    }
+    expect(tester.widget<RawImage>(find.byType(RawImage)).image, isNotNull);
+    expect(tester.getTopLeft(title), initialTitle);
+    expect(tester.getTopLeft(body), initialBody);
   });
 
   testWidgets('imageWithText keeps a separate text block under media', (

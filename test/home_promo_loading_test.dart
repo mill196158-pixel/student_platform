@@ -11,6 +11,11 @@ import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/services/push/app_notifications_api.dart';
 
+final _savedPng = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGPQ3dKDFTEMLQkAkBVbQXClKcwAAAAASUVORK5CYII=');
+final _replacementPng = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGMwCdiHFTEMLQkAUhlQgeFyboYAAAAASUVORK5CYII=');
+
 class Dashboard implements HomeDashboardService {
   @override
   String? get currentUserId => 'fixture';
@@ -35,17 +40,28 @@ class Notifications implements AppNotificationsApi {
 }
 
 class Promo implements HomePromoService {
+  Promo({this.hasCache = true});
+
+  final bool hasCache;
   final events = <String>[];
+  int loadCalls = 0;
   @override
   Future<void> recordEvent(String id, String event) async =>
       events.add('$id:$event');
   final pending = Completer<HomePromoLoadResult>();
   @override
-  Future<HomePromoLoadResult> load({bool writeCache = true}) => pending.future;
-  @override
-  Future<HomePromoLoadResult> loadCached() async => withCover('image-a');
+  Future<HomePromoLoadResult> load({bool writeCache = true}) {
+    loadCalls++;
+    return pending.future;
+  }
 
-  HomePromoLoadResult withCover(String cover) => HomePromoLoadResult(cards: [
+  @override
+  Future<HomePromoLoadResult> loadCached() async => hasCache
+      ? withCover('image-a')
+      : const HomePromoLoadResult(intentionallyEmpty: true);
+
+  HomePromoLoadResult withCover(String cover, {String icon = 'icon-a'}) =>
+      HomePromoLoadResult(cards: [
         ManagedContentCard.tryParseHomePromo({
           'id': 'cached',
           'template_key': 'home_promo_v1',
@@ -64,7 +80,7 @@ class Promo implements HomePromoService {
             'dismissible': true,
             'card_variant': 'image_full',
             'image_asset_id': cover,
-            'icon_asset_id': 'icon-a',
+            'icon_asset_id': icon,
             'home_slot': 'after_news'
           },
         })!,
@@ -74,11 +90,24 @@ class Promo implements HomePromoService {
 }
 
 class Media implements ContentMediaService {
-  final requested = <String>[];
+  Media({this.disk = const {}, this.live = const {}});
+
+  final Map<String, Uint8List> disk;
+  final Map<String, Uint8List> live;
+  final diskRequests = <String>[];
+  final networkRequests = <String>[];
+
+  @override
+  Future<Uint8List?> readCachedBytes(String id,
+      {String? contentVersion}) async {
+    diskRequests.add(id);
+    return disk[id];
+  }
+
   @override
   Future<Uint8List?> fetchBytes(String id, {String? contentVersion}) async {
-    requested.add(id);
-    return null;
+    networkRequests.add(id);
+    return live[id];
   }
 
   @override
@@ -86,17 +115,14 @@ class Media implements ContentMediaService {
 }
 
 class SlowMedia extends Media {
+  SlowMedia({super.disk});
+
   final image = Completer<Uint8List?>();
   final icon = Completer<Uint8List?>();
-  final replacement = Completer<Uint8List?>();
   @override
   Future<Uint8List?> fetchBytes(String id, {String? contentVersion}) {
-    requested.add(id);
-    return switch (id) {
-      'image-a' => image.future,
-      'image-b' => replacement.future,
-      _ => icon.future,
-    };
+    networkRequests.add(id);
+    return id.startsWith('image-') ? image.future : icon.future;
   }
 }
 
@@ -131,15 +157,25 @@ HomeDashboardData partial(String id, String name) => HomeDashboardData(
     scheduleStatus: 'Загружаем расписание…',
     assignmentsStatus: 'Загружаем ближайшие дела…');
 
+Future<void> _waitFor(WidgetTester tester, bool Function() ready) async {
+  for (var frame = 0; !ready() && frame < 100; frame++) {
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+    await tester.pump();
+  }
+  expect(ready(), isTrue);
+}
+
+StudentHomeView _home(WidgetTester tester) =>
+    tester.widget<StudentHomeView>(find.byType(StudentHomeView));
+
 void main() {
-  testWidgets('replacement promo cover preserves the existing slot and hides old bytes',
+  testWidgets('replacement promo preserves the whole saved slot until decoded',
       (t) async {
     final dashboard = ProgressiveDashboard();
     final notifications = Notifications()..pending.complete(0);
     final promo = Promo();
-    final media = SlowMedia();
-    final bytes = base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==');
+    final media = SlowMedia(disk: {'image-a': _savedPng, 'icon-a': _savedPng});
     await t.pumpWidget(MaterialApp(
       home: HomeScreen(
         dashboardService: dashboard,
@@ -149,35 +185,36 @@ void main() {
       ),
     ));
     await t.pump();
-    media.image.complete(bytes);
-    media.icon.complete(null);
-    await t.pump();
-    await t.pump();
     dashboard.requests.single.complete(partial('a', 'Alice'));
-    await t.pumpAndSettle();
     final summary = find.text('Сводка дня');
     final card = find.text('Cached promo');
+    await _waitFor(t, () => card.evaluate().isNotEmpty);
     final summaryPosition = t.getTopLeft(summary);
     final originalCardPosition = t.getTopLeft(card);
     expect(originalCardPosition.dy, lessThan(summaryPosition.dy));
 
-    promo.pending.complete(promo.withCover('image-b'));
+    promo.pending.complete(promo.withCover('image-b', icon: 'icon-b'));
+    await _waitFor(t, () => media.networkRequests.length == 2);
+    expect(media.networkRequests, containsAll(['image-b', 'icon-b']));
+    media.image.complete(_replacementPng);
     await t.pump();
-    await t.pump(const Duration(milliseconds: 30));
-    expect(media.requested, contains('image-b'));
-    final placement = t.widget<StudentHomeView>(find.byType(StudentHomeView))
-        .homePromoPlacements.single;
-    expect(placement.imageLoading, isTrue);
-    expect(placement.imageBytes, isNull);
+    final placement = _home(t).homePromoPlacements.single;
+    expect(placement.imageLoading, isFalse);
+    expect(placement.imageBytes, same(_savedPng));
+    expect(placement.iconBytes, same(_savedPng));
     expect(t.getTopLeft(summary), summaryPosition);
     expect(t.getTopLeft(card), originalCardPosition);
 
-    media.replacement.complete(bytes);
-    await t.pumpAndSettle();
+    media.icon.complete(_replacementPng);
+    await _waitFor(
+        t,
+        () => identical(
+            _home(t).homePromoPlacements.single.imageBytes, _replacementPng));
     expect(t.getTopLeft(summary), summaryPosition);
     expect(t.getTopLeft(card), originalCardPosition);
-    expect(t.widget<StudentHomeView>(find.byType(StudentHomeView))
-        .homePromoPlacements.single.imageState?.isReady, isTrue);
+    expect(_home(t).homePromoPlacements.single.imageState?.isReady, isTrue);
+    expect(
+        _home(t).homePromoPlacements.single.iconBytes, same(_replacementPng));
     await t.pumpWidget(const SizedBox());
   });
 
@@ -186,7 +223,8 @@ void main() {
     final active = ValueNotifier<bool>(false);
     final dashboard = ProgressiveDashboard();
     final promo = Promo();
-    final media = SlowMedia();
+    final bytes = {'image-a': _savedPng, 'icon-a': _savedPng};
+    final media = Media(disk: bytes, live: bytes);
     final notifications = Notifications();
     await t.pumpWidget(MaterialApp(
         home: HomeScreen(
@@ -196,17 +234,12 @@ void main() {
             contentMedia: media,
             notificationsApi: notifications)));
     await t.pump();
-    media.image.complete(base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='));
-    media.icon.complete(null);
-    await t.pump();
-    await t.pump();
     expect(promo.events, isEmpty);
     dashboard.updates.single(partial('a', 'Alice'));
-    await t.pump();
+    await _waitFor(t, () => find.text('Cached promo').evaluate().isNotEmpty);
     expect(promo.events, isEmpty);
     active.value = true;
-    await t.pump();
+    await _waitFor(t, () => promo.events.isNotEmpty);
     expect(promo.events, ['cached:impression']);
     dashboard.requests.single.complete(partial('a', 'Alice'));
     promo.pending.complete(await promo.loadCached());
@@ -217,10 +250,10 @@ void main() {
     active.dispose();
   });
   for (final success in [true, false]) {
-    testWidgets('promo stays hidden until usable image; success=$success',
+    testWidgets('new promo waits for all of its usable media; success=$success',
         (t) async {
       final dashboard = ProgressiveDashboard();
-      final promo = Promo();
+      final promo = Promo(hasCache: false);
       final media = SlowMedia();
       final notifications = Notifications();
       await t.pumpWidget(MaterialApp(
@@ -231,32 +264,34 @@ void main() {
               notificationsApi: notifications)));
       await t.pump();
       dashboard.updates.single(partial('a', 'Alice'));
-      await t.pump();
-      expect(media.requested, containsAll(['image-a', 'icon-a']));
-      var view = t.widget<StudentHomeView>(find.byType(StudentHomeView));
+      await _waitFor(t, () => promo.loadCalls > 0);
+      expect(media.diskRequests, isEmpty);
+      expect(media.networkRequests, isEmpty);
+      promo.pending.complete(promo.withCover('image-a'));
+      await _waitFor(t, () => media.networkRequests.length == 2);
+      expect(media.networkRequests, containsAll(['image-a', 'icon-a']));
+      final view = _home(t);
       expect(view.hideHomePromo, isTrue);
       expect(view.homePromoPlacements, isEmpty);
       expect(promo.events, isEmpty);
       expect(find.text('Cached promo'), findsNothing);
       if (success) {
-        media.image.complete(base64Decode(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='));
+        media.image.complete(_savedPng);
       } else {
         media.image.completeError(StateError('offline'));
       }
       await t.pump();
-      await t.pump();
-      view = t.widget<StudentHomeView>(find.byType(StudentHomeView));
-      expect(view.hideHomePromo, !success);
-      expect(view.homePromoPlacements.length, success ? 1 : 0);
-      expect(promo.events, success ? ['cached:impression'] : isEmpty);
-      expect(media.icon.isCompleted, isFalse,
-          reason: 'main image does not wait for icon');
-      media.icon.complete(null);
+      expect(_home(t).homePromoPlacements, isEmpty);
+      expect(promo.events, isEmpty);
+      media.icon.complete(_savedPng);
       dashboard.requests.single.complete(partial('a', 'Alice'));
-      promo.pending.complete(await promo.loadCached());
       notifications.pending.complete(0);
+      if (success) {
+        await _waitFor(t, () => _home(t).homePromoPlacements.isNotEmpty);
+      }
       await t.pumpAndSettle();
+      expect(_home(t).hideHomePromo, !success);
+      expect(_home(t).homePromoPlacements.length, success ? 1 : 0);
       expect(promo.events.length, success ? 1 : 0);
       expect(t.takeException(), isNull);
     });
@@ -265,7 +300,7 @@ void main() {
       'deadline releases coalescing and late attempt cannot overwrite retry',
       (t) async {
     final dashboard = ProgressiveDashboard();
-    final promo = Promo();
+    final promo = Promo(hasCache: false);
     final notifications = Notifications();
     await t.pumpWidget(MaterialApp(
         home: HomeScreen(
@@ -298,7 +333,7 @@ void main() {
       'partial dashboard visible before completion; coalesce and reject old account updates',
       (t) async {
     final dashboard = ProgressiveDashboard();
-    final promo = Promo();
+    final promo = Promo(hasCache: false);
     final notifications = Notifications();
     await t.pumpWidget(MaterialApp(
         home: HomeScreen(
@@ -308,8 +343,7 @@ void main() {
             contentMedia: Media())));
     await t.pump();
     dashboard.updates[0](partial('a', 'Alice'));
-    await t.pump();
-    expect(find.byType(StudentHomeView), findsOneWidget);
+    await _waitFor(t, () => find.textContaining('Alice').evaluate().isNotEmpty);
     expect(find.text('Сегодня выходной'), findsNothing);
     expect(find.text('Пока нет ближайших заданий'), findsNothing);
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -322,7 +356,7 @@ void main() {
     await t.pump();
     expect(dashboard.requests, hasLength(2));
     dashboard.updates[1](partial('b', 'Bob'));
-    await t.pump();
+    await _waitFor(t, () => find.textContaining('Bob').evaluate().isNotEmpty);
     dashboard.updates[0](partial('a', 'Wrong old account'));
     await t.pump();
     expect(find.textContaining('Wrong old account'), findsNothing);
@@ -340,7 +374,7 @@ void main() {
     final dashboard = Dashboard();
     final notifications = Notifications();
     final promo = Promo();
-    final media = Media();
+    final media = Media(disk: {'image-a': _savedPng, 'icon-a': _savedPng});
     await t.pumpWidget(MaterialApp(
         home: HomeScreen(
             dashboardService: dashboard,
@@ -349,7 +383,9 @@ void main() {
             contentMedia: media)));
     await t.pump();
     await t.pump();
-    expect(media.requested, contains('image-a'));
+    expect(media.diskRequests, containsAll(['image-a', 'icon-a']));
+    expect(media.networkRequests, isEmpty);
+    expect(promo.loadCalls, 0);
     expect(dashboard.pending.isCompleted, isFalse);
     expect(notifications.pending.isCompleted, isFalse);
     expect(promo.pending.isCompleted, isFalse);
