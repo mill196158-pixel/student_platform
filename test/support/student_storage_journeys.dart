@@ -22,6 +22,13 @@ Future<void> exerciseStudentStorage(WidgetTester tester, String chat) async {
       await Directory('${temp.path}/downloaded_chat_files').create();
   final bytes = Uint8List.fromList(List.generate(127, (i) => i));
   final drawing = await File('${downloads.path}/first.dwg').writeAsBytes(bytes);
+  final pinned = await Directory('${temp.path}/pinned_media_v1').create();
+  final saved = await File('${pinned.path}/saved-offline.pdf')
+      .writeAsBytes([5, 7, 11, 13]);
+  final history = await File('${temp.path}/offline_chat_ordinary_v1.db')
+      .writeAsBytes([17, 19, 23]);
+  final drafts =
+      await File('${temp.path}/draft_recovery_v1.db').writeAsBytes([29, 31]);
   final db = await databaseFactoryFfi.openDatabase('${temp.path}/index.db');
   final store = NewsSqliteImageStore.forCollectionTest(
       database: db, root: Directory('${temp.path}/blobs'));
@@ -53,16 +60,7 @@ Future<void> exerciseStudentStorage(WidgetTester tester, String chat) async {
     await tester.pump(const Duration(milliseconds: 350));
   }
 
-  void listTop() {
-    final scroll = find
-        .descendant(
-            of: find.byType(CacheDiagnosticsScreen),
-            matching: find.byType(Scrollable))
-        .first;
-    tester.state<ScrollableState>(scroll).position.jumpTo(0);
-  }
-
-  Future<void> show(OptionalImageCacheBudget policy) async {
+  Future<void> show() async {
     await tester.pumpWidget(MaterialApp(
         key: UniqueKey(),
         builder: (context, child) => MediaQuery(
@@ -70,13 +68,16 @@ Future<void> exerciseStudentStorage(WidgetTester tester, String chat) async {
                 .copyWith(textScaler: TextScaler.linear(1.6)),
             child: child!),
         home: CacheDiagnosticsScreen(
-            budget: policy,
-            measureAttachments: inventory.collect,
             clearNews: news.clearStoredCopies,
             measure: () async => InventorySnapshot(
-                startedAt: DateTime.now(),
-                finishedAt: DateTime.now(),
-                observations: []))));
+                    startedAt: DateTime.now(),
+                    finishedAt: DateTime.now(),
+                    observations: [
+                      InventoryObservation(
+                          'public_news_blobs_v2',
+                          InventoryClass.optional,
+                          (await store.read(key))?.length ?? 0),
+                    ]))));
     await tester.pump(const Duration(milliseconds: 300));
   }
 
@@ -86,51 +87,39 @@ Future<void> exerciseStudentStorage(WidgetTester tester, String chat) async {
         await store.put(
             key, Uint8List.fromList([1, 2, 3]), await store.capture(key)),
         isTrue);
-    await show(budget);
-    await tap('Изменить целевой лимит');
-    await waitFor(find.byType(SimpleDialog));
-    await tap('250 МБ');
-    await budget.waitForPolicy();
-    expect(budget.limitBytes, 250000000,
-        reason: 'Choice must persist before returning to the list');
-    listTop();
-    await tester.pump(const Duration(milliseconds: 300));
-    await waitFor(find.textContaining('250.0 МБ'));
-    await tester.pumpWidget(const SizedBox.shrink());
+    expect(await budget.setLimit(250000000), isTrue);
     final reload = OptionalImageCacheBudget(
         roots: () async => [temp], persistPolicy: true);
-    await show(reload);
-    listTop();
-    await waitFor(find.textContaining('250.0 МБ'));
+    await reload.waitForPolicy();
     expect(reload.limitBytes, 250000000);
+    await show();
+    await waitFor(find.text('3 Б'));
+    expect(find.text('Очистить кэш').hitTestable(), findsOneWidget);
+    expect(find.text('Изменить целевой лимит'), findsNothing);
     debugPrint(
-        'PARTIAL E2E-091 large text 390px, limit survives policy and screen recreation in this process');
-    await tap('Очистить кэш публичных новостей');
-    await tap('Удалить копии');
-    await waitFor(find.textContaining('Очистка завершена.'));
+        'PASS E2E-091 large text 390px shows the clear action and internal cache policy still survives reload');
+    await tap('Очистить кэш');
+    await tap('Очистить');
+    await waitFor(find.text('Кэш очищен.'));
+    await waitFor(find.text('0 Б'));
     expect(await store.read(key), isNull);
     expect(await drawing.readAsBytes(), orderedEquals(bytes));
+    expect(await saved.readAsBytes(), [5, 7, 11, 13]);
+    expect(await history.readAsBytes(), [17, 19, 23]);
+    expect(await drafts.readAsBytes(), [29, 31]);
     if (cad == null) {
-      debugPrint('PARTIAL E2E-092 news removed and on-disk attachment unchanged');
+      debugPrint(
+          'PASS E2E-092 news removed and saved file, chat, draft and attachment bytes preserved');
     } else {
       await cad.openAfterClear(tester);
-      await show(reload);
     }
-    final measured = find.text('Скачанные вложения: 127 Б');
-    if (measured.evaluate().isEmpty) {
-      listTop();
-      await tester.scrollUntilVisible(measured, 180);
-    }
-    await waitFor(measured);
+    expect((await inventory.collect()).downloadedFilesBytes, 127);
     await File('${downloads.path}/second.dwg')
         .writeAsBytes(List.filled(211, 0x7A));
-    await tap('Обновить');
-    await waitFor(find.text('Скачанные вложения: 338 Б'));
-    await tap('Обновить');
-    await waitFor(find.text('Скачанные вложения: 338 Б'));
+    expect((await inventory.collect()).downloadedFilesBytes, 338);
     expect((await inventory.collect()).downloadedFilesBytes, 338);
     debugPrint(
-        'PASS E2E-093 actual storage 127 + 211 = 338 bytes across two refresh actions');
+        'PASS E2E-093 internal inventory counts 127 + 211 = 338 bytes on repeated reads');
   } finally {
     await tester.pumpWidget(const SizedBox.shrink());
     await db.close();

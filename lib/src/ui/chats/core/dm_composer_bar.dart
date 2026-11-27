@@ -365,8 +365,8 @@ class _DmPlusButton extends StatelessWidget {
             ),
           );
         },
-        child: Padding(
-          padding: const EdgeInsets.all(10),
+        child: SizedBox.square(
+          dimension: Composer.controlSize,
           child: Icon(Icons.add,
               size: 24, color: theme.colorScheme.onSurfaceVariant),
         ),

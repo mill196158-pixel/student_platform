@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:student_ui/student_ui.dart';
 
 import '../../core/optional_image_cache_budget.dart';
@@ -45,6 +46,12 @@ class PublicNewsImageCache {
   Future<PublicNewsClearResult>? _clearing;
   int _clearEpoch = 0;
   final Map<String, int> _pathEpoch = {};
+  final ValueNotifier<int> _revision = ValueNotifier<int>(0);
+
+  ValueListenable<int> get invalidations => _revision;
+
+  (int, int) displayVersion(NewsImageCacheKey key) =>
+      (_clearEpoch, _pathEpoch[key.path] ?? 0);
 
   static Future<NewsSqliteImageStore> _openDefault() => NewsSqliteImageStore.openPublicNews();
 
@@ -182,6 +189,7 @@ class PublicNewsImageCache {
 
   Future<void> invalidate([String? path]) async {
     if (path == null) { _clearEpoch++; } else { _pathEpoch[path] = (_pathEpoch[path] ?? 0) + 1; }
+    _revision.value++;
     final ids = _inflightPaths.entries.where((entry) => path == null || entry.value == path).map((entry) => entry.key).toList();
     for (final id in ids) { _inflight.remove(id); _inflightPaths.remove(id); }
     await (await _store()).invalidate(path);
@@ -195,10 +203,12 @@ class PublicNewsImageCache {
     _clearEpoch++;
     _inflight.clear();
     _inflightPaths.clear();
-    return _clearing = _clearStoredCopies().whenComplete(() {
+    _clearing = _clearStoredCopies().whenComplete(() {
       _clearing = null;
       _budget.refreshAfterCollection();
     });
+    _revision.value++;
+    return _clearing!;
   }
 
   Future<PublicNewsClearResult> _clearStoredCopies() async {

@@ -1,6 +1,8 @@
 import 'package:student_ui/student_ui.dart' show ProductLoadingIndicator;
 import 'package:flutter/material.dart';
 
+import '../composer.dart';
+
 class ChatPlusAction {
   final IconData icon;
   final String title;
@@ -40,8 +42,8 @@ class ChatPlusButton extends StatelessWidget {
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: () => _showActions(context),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
+        child: SizedBox.square(
+          dimension: Composer.controlSize,
           child: Icon(Icons.add,
               size: 24, color: theme.colorScheme.onSurfaceVariant),
         ),

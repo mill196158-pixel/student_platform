@@ -5,7 +5,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/foundation.dart' show kReleaseMode, ValueListenable;
+import 'package:flutter/foundation.dart'
+    show kReleaseMode, listEquals, ValueListenable;
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:student_ui/student_ui.dart';
@@ -23,6 +24,7 @@ import 'package:student_platform/src/ui/home/home_promo_service.dart';
 import 'package:student_platform/src/ui/home/home_content_coordinator.dart';
 import 'package:student_platform/src/ui/home/home_content_verified_loader.dart';
 import 'package:student_platform/src/ui/home/models/home_dashboard_data.dart';
+import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 import 'package:student_platform/src/ui/info/content_media_service.dart';
 import 'package:student_platform/src/ui/info/home_content_snapshot_store.dart';
 import 'package:student_platform/src/ui/learning/tabs/chat/models/group_action_labels.dart';
@@ -94,6 +96,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, Uint8List> _promoImageBytes = {};
   final Map<String, Uint8List> _promoIconBytes = {};
   final Map<String, ContentImageRenderState> _promoImageStates = {};
+  final _newsCoverProviders = <Uint8List, ImageProvider>{};
   final Map<String, HomeContentSnapshot> _lateOptionalContent = {};
   int _contentRevision = 0;
   SessionCapabilities? _observedContentCaps;
@@ -110,6 +113,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.activeListenable?.addListener(_onHomeActiveChanged);
+    PublicNewsImageCache.shared.invalidations.addListener(_clearDisplayedNewsCovers);
     widget.homeContent?.addListener(_onContentAccessChanged);
     _bindContentCapabilities();
     CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)?.addListener(_onCachedReadReady);
@@ -133,6 +137,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _beginContentLayoutVisit() {
     _contentLayoutVisit++;
     _shownPromosThisVisit.clear();
+  }
+
+  void _clearDisplayedNewsCovers() {
+    _newsCoverProviders.clear();
+    final data = _data;
+    if (mounted && data != null) {
+      setState(() => _data = _withoutNewsCovers(data));
+    }
+  }
+
+  HomeDashboardData _withoutNewsCovers(HomeDashboardData data) =>
+      data.withNews(_clearNewsBytes(data.news));
+
+  ImageProvider _newsCoverProvider(Uint8List bytes) =>
+      _newsCoverProviders.putIfAbsent(bytes, () {
+        final ratio = MediaQuery.devicePixelRatioOf(context);
+        final targetWidth = (288 * ratio).round().clamp(288, 1440).toInt();
+        return ResizeImage.resizeIfNeeded(targetWidth, null, MemoryImage(bytes));
+      });
+
+  Future<void> _prepareFirstNewsCovers(List<Uint8List?> covers,
+      bool Function() current, Duration remaining) async {
+    if (!current()) return;
+    await Future.wait([
+      for (final bytes in covers)
+        if (bytes != null)
+          precacheImage(_newsCoverProvider(bytes), context, onError: (_, __) {}),
+    ]).timeout(remaining, onTimeout: () => []);
+  }
+
+  List<Uint8List?> _firstCoverBytes(HomeDashboardData data) => [
+        for (final item in data.news.take(4))
+          item.usesImage ? item.imageBytes : null,
+      ];
+
+  List<HomeNewsItem> _clearNewsBytes(List<HomeNewsItem> items) => [
+        for (final item in items) item.copyWith(clearImageBytes: true),
+      ];
+
+  void _presentDashboard(HomeDashboardData next) {
+    final used = next.news.map((item) => item.imageBytes).toSet();
+    _newsCoverProviders.removeWhere((bytes, _) => !used.contains(bytes));
+    setState(() {
+      _data = next;
+      _error = null;
+    });
   }
 
   void _onContentAccessChanged() {
@@ -169,11 +219,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _contentPermit = _observedContentCaps?.capture(SessionCapability.cachedRead);
     final data = _data;
     if (data != null) {
-      _data = HomeDashboardData(profile: data.profile, scheduleDate: data.scheduleDate,
-          todayLessons: data.todayLessons, assignments: data.assignments, news: const [],
-          scheduleStatus: data.scheduleStatus, assignmentsStatus: data.assignmentsStatus,
-          readNotificationIds: data.readNotificationIds, unreadMessagesCount: data.unreadMessagesCount,
-          warning: data.warning, groupActions: data.groupActions);
+      _data = data.withNews(const [], loading: false);
+      _newsCoverProviders.clear();
     }
     _promo = const HomePromoLoadResult(intentionallyEmpty: true);
     _promoImageBytes.clear(); _promoIconBytes.clear(); _promoImageStates.clear();
@@ -219,6 +266,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _authScope?.removeListener(_onAuthScopeChanged);
       if (_ownsService) _service.dispose();
       _data = null;
+      _newsCoverProviders.clear();
       _loadInFlight = null;
       _loadUserId = null;
       _loadAuthScope = null;
@@ -259,6 +307,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_authScope != null && owner == null) {
       setState(() {
         _data = null;
+        _newsCoverProviders.clear();
         _error = null;
         _loading = true;
         _loadUserId = null;
@@ -337,6 +386,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           HomeDashboardService(sessionScope: _authScope);
     }
     _data = null;
+    _newsCoverProviders.clear();
     _error = null;
     _loading = true;
     _loadInFlight = null;
@@ -351,6 +401,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.activeListenable?.removeListener(_onHomeActiveChanged);
+    PublicNewsImageCache.shared.invalidations.removeListener(_clearDisplayedNewsCovers);
     widget.homeContent?.removeListener(_onContentAccessChanged);
     _observedContentCaps?.removeListener(_onContentCapabilityChanged);
     CachedHomeScheduleReader.homeRefreshFor(widget.cachedReader)?.removeListener(_onCachedReadReady);
@@ -410,6 +461,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _loadAuthScope == operationScope) return _loadInFlight!;
     if (_loadUserId != userId) {
       _data = null;
+      _newsCoverProviders.clear();
       _error = null;
       _beginContentLayoutVisit();
       _avatarPrecacheKey = null;
@@ -441,17 +493,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return work;
   }
 
-  Future<void> _showSavedHeader(CachedHomeScheduleReader reader) async {
+  Future<void> _showSavedHeader(CachedHomeScheduleReader reader,
+      Future<List<HomeNewsItem>> newsWork, bool Function() current,
+      List<HomeNewsItem> Function(List<HomeNewsItem>) permittedNews) async {
     try {
       final profile = await reader.readProfile();
-      if (profile == null || !mounted || _data != null ||
-          !identical(widget.cachedReader, reader) || !reader.canRead) return;
-      setState(() => _data = HomeDashboardData(
+      final news = await newsWork;
+      if (profile == null || _data != null || !current()) return;
+      _presentDashboard(HomeDashboardData(
         profile: profile,
         scheduleDate: MskDate.today(),
         todayLessons: const [],
         assignments: const [],
-        news: const [],
+        news: permittedNews(news),
         scheduleStatus: 'Открываем сохранённое расписание…',
         assignmentsStatus: 'Открываем сохранённые задания…',
       ));
@@ -464,9 +518,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final reader = widget.cachedReader;
     if (reader != null) {
       final firstCoreFrame = _data == null;
-      if (firstCoreFrame) unawaited(_showSavedHeader(reader));
       try {
-        final snapshot = await reader.readDashboard();
         final content = widget.homeContent;
         final caps = widget.homeContentCapabilities;
         final permit = _contentPermit;
@@ -476,6 +528,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             contentRevision == _contentRevision && reader.canRead;
         bool currentContent() => currentContext() && content != null && caps != null && permit != null &&
             identical(permit, _contentPermit) && reader.permitsContent(caps, permit);
+        final coverRevision = PublicNewsImageCache.shared.invalidations.value;
+        bool currentNews() => currentContent() && content?.isDenied('news') != true;
+        bool currentCovers() => currentNews() &&
+            PublicNewsImageCache.shared.invalidations.value == coverRevision;
+        List<HomeNewsItem> permittedNews(List<HomeNewsItem> items) =>
+            !currentNews() ? const [] : currentCovers() ? items : _clearNewsBytes(items);
         Future<HomeContentSnapshot?> readOptional(String section) async {
           if (content == null || caps == null || !currentContent()) return null;
           try {
@@ -502,40 +560,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         }
 
-        if (!currentContext()) return;
-        // The saved schedule/profile is usable while optional media settles.
-        // Keep the prior frame during refresh so the feed does not collapse.
-        if (firstCoreFrame) {
-          setState(() {
-            _data = snapshot;
-            _loading = false;
-            _error = null;
-          });
-        }
-        final optional = await Future.wait([readOptional('news'), readOptional('promo')]);
-        final savedNews = optional[0];
-        final savedPromo = optional[1];
-        if (!currentContext())
-          return;
-        final news = <HomeNewsItem>[];
-        for (final row in savedNews?.rows ?? <Map<String, dynamic>>[]) {
-          try {
-            final item = mapPublishedNews(row);
-            final key = row['_offline_image'];
-            news.add(item.copyWith(
-                imageBytes: key is String ? savedNews!.images[key] : null));
-          } catch (_) {
-            /* A malformed optional card cannot hide the dashboard. */
+        Future<List<HomeNewsItem>> readNewsForDisplay() async {
+          final saved = await readOptional('news');
+          if (!currentNews()) return const [];
+          if (saved == null) return permittedNews(_data?.news ?? const []);
+          final news = <HomeNewsItem>[];
+          for (final row in saved.rows) {
+            try {
+              final item = mapPublishedNews(row);
+              final key = row['_offline_image'];
+              news.add(item.copyWith(
+                  imageBytes: key is String ? saved.images[key] : null));
+            } catch (_) {
+              // A malformed optional card cannot hide the dashboard.
+            }
           }
+          if (news.isEmpty) return news;
+          if (!currentCovers()) return permittedNews(news);
+          List<HomeNewsItem> verified;
+          try {
+            verified = await _service.validateNewsImages(news)
+                .timeout(const Duration(seconds: 1));
+          } catch (_) {
+            verified = _clearNewsBytes(news);
+          }
+          if (!currentCovers()) return permittedNews(news);
+          final prior = {
+            for (final item in _data?.news ?? const <HomeNewsItem>[])
+              item.id: item
+          };
+          verified = [
+            for (final item in verified)
+              if (prior[item.id] case final old?
+                  when old.imageCacheKey?.id == item.imageCacheKey?.id &&
+                      item.imageBytes != null && listEquals(old.imageBytes, item.imageBytes))
+                item.copyWith(imageBytes: old.imageBytes)
+              else
+                item,
+          ];
+          if (firstCoreFrame) {
+            await _prepareFirstNewsCovers([
+              for (final item in verified.take(4))
+                item.usesImage ? item.imageBytes : null,
+            ], currentCovers, const Duration(milliseconds: 600));
+          }
+          return permittedNews(verified);
         }
-        List<HomeNewsItem> verifiedNews;
-        try {
-          verifiedNews = news.isEmpty ? news :
-              await _service.validateNewsImages(news).timeout(const Duration(seconds: 1));
-        } catch (_) {
-          // A damaged or slow optional image store must not hide the dashboard.
-          verifiedNews = news.map((item) => item.copyWith(clearImageBytes: true)).toList();
+
+        if (!currentContext()) return;
+        final newsWork = readNewsForDisplay();
+        final promoWork = readOptional('promo');
+        if (firstCoreFrame) {
+          unawaited(_showSavedHeader(
+              reader, newsWork, currentContext, permittedNews));
         }
+        final snapshot = await reader.readDashboard();
+        final verifiedNews = await newsWork;
+        if (!currentContext()) return;
+        _presentDashboard(snapshot.withNews(
+            permittedNews(verifiedNews), loading: false));
+        final savedPromo = await promoWork;
         if (!currentContext()) return;
         final promos = <ManagedContentCard>[];
         for (final row in savedPromo?.rows ?? <Map<String, dynamic>>[]) {
@@ -555,18 +639,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           promos.add(card);
         }
         setState(() {
-          _data = HomeDashboardData(
-              profile: snapshot.profile,
-              scheduleDate: snapshot.scheduleDate,
-              todayLessons: snapshot.todayLessons,
-              assignments: snapshot.assignments,
-              news: verifiedNews,
-              scheduleStatus: snapshot.scheduleStatus,
-              assignmentsStatus: snapshot.assignmentsStatus,
-              readNotificationIds: snapshot.readNotificationIds,
-              unreadMessagesCount: snapshot.unreadMessagesCount,
-              warning: snapshot.warning,
-              groupActions: snapshot.groupActions);
           _promo = HomePromoLoadResult(
               cards: promos, intentionallyEmpty: promos.isEmpty);
           _loading = false;
@@ -605,40 +677,60 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final promoGeneration = ++_promoLoadGeneration;
-    // Cache-first, scoped to this account and refresh attempt.
-    unawaited(_paintCachedNews(promoGeneration, userId));
+    final coverRevision = PublicNewsImageCache.shared.invalidations.value;
+    bool current() => mounted &&
+        promoGeneration == _promoLoadGeneration &&
+        _service.currentUserId == userId;
+    HomeDashboardData currentCovers(HomeDashboardData data) =>
+        PublicNewsImageCache.shared.invalidations.value == coverRevision
+            ? data
+            : _withoutNewsCovers(data);
+    HomeDashboardData? pending;
+    Future<void>? firstPaint;
+    void commit(HomeDashboardData data) {
+      if (!current()) return;
+      if (!reportedFirstContent &&
+          (!kReleaseMode || const bool.fromEnvironment('STARTUP_TRACE'))) {
+        reportedFirstContent = true;
+        debugPrint(
+            '[home-perf] first partial data ${firstContentClock.elapsedMilliseconds}ms');
+      }
+      _presentDashboard(currentCovers(data));
+      _warmProfileAvatar(data.profile);
+    }
+
+    void offer(HomeDashboardData data) {
+      if (!current()) return;
+      pending = data;
+      if (_data != null || (firstPaint == null &&
+          !_firstCoverBytes(currentCovers(data)).any((bytes) => bytes != null))) {
+        commit(data);
+        return;
+      }
+      firstPaint ??= () async {
+        const budget = Duration(milliseconds: 600);
+        final clock = Stopwatch()..start();
+        while (current() && clock.elapsed < budget) {
+          final covers = _firstCoverBytes(currentCovers(pending!));
+          await _prepareFirstNewsCovers(covers, current, budget - clock.elapsed);
+          if (!current() ||
+              listEquals(covers, _firstCoverBytes(currentCovers(pending!)))) {
+            break;
+          }
+        }
+        if (current()) commit(pending!);
+      }();
+    }
+
     // Promo metadata/media must not wait for schedule, news or badge queries.
     unawaited(_refreshPromo(promoGeneration));
     unawaited(_refreshUnreadBadge());
     try {
       final next = await _service
-          .load(
-              previous: _data,
-              onUpdate: (partial) {
-                if (!mounted ||
-                    promoGeneration != _promoLoadGeneration ||
-                    _service.currentUserId != userId) return;
-                if (!reportedFirstContent &&
-                    (!kReleaseMode ||
-                        const bool.fromEnvironment('STARTUP_TRACE'))) {
-                  reportedFirstContent = true;
-                  debugPrint(
-                      '[home-perf] first partial data ${firstContentClock.elapsedMilliseconds}ms');
-                }
-                setState(() {
-                  _data = _mergeDashboardNewsImages(_data, partial);
-                  _error = null;
-                });
-                _warmProfileAvatar(partial.profile);
-              })
+          .load(previous: _data, onUpdate: offer)
           .timeout(const Duration(seconds: 18));
-      if (!mounted ||
-          promoGeneration != _promoLoadGeneration ||
-          _service.currentUserId != userId) return;
-      setState(() {
-        _data = _mergeDashboardNewsImages(_data, next);
-        _error = null;
-      });
+      offer(next);
+      await firstPaint;
     } catch (error) {
       if (error is HomeLoadCancelled) return;
       if (!mounted ||
@@ -718,70 +810,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }));
   }
 
-  Future<void> _paintCachedNews(int generation, String? userId) async {
-    try {
-      final cached = await _service.loadCachedNews();
-      if (!mounted ||
-          generation != _promoLoadGeneration ||
-          userId != _service.currentUserId ||
-          cached.isEmpty ||
-          _data == null) return;
-      final base = _data!;
-      final prior = base.profile.id == userId
-          ? {for (final item in base.news) item.id: item}
-          : <String, HomeNewsItem>{};
-      final candidates = cached.map((item) {
-        final old = prior[item.id];
-        return item.imageBytes == null && old?.imageBytes != null &&
-                item.imageCacheKey?.id != null &&
-                item.imageCacheKey?.id == old!.imageCacheKey?.id
-            ? item.copyWith(imageBytes: old.imageBytes)
-            : item;
-      }).toList();
-      final verified = await _service.validateNewsImages(candidates).timeout(const Duration(seconds: 1));
-      if (!mounted || generation != _promoLoadGeneration ||
-          userId != _service.currentUserId || !identical(_data, base)) return;
-      setState(() {
-        _data = _mergeDashboardNewsImages(
-          _data,
-          HomeDashboardData(
-            scheduleStatus: _data!.scheduleStatus,
-            assignmentsStatus: _data!.assignmentsStatus,
-            profile: _data!.profile,
-            scheduleDate: _data!.scheduleDate,
-            todayLessons: _data!.todayLessons,
-            assignments: _data!.assignments,
-            news: verified,
-            readNotificationIds: _data!.readNotificationIds,
-            unreadMessagesCount: _data!.unreadMessagesCount,
-            warning: _data!.warning,
-            groupActions: _data!.groupActions,
-          ),
-        );
-      });
-    } catch (_) {}
-  }
-
-  HomeDashboardData _mergeDashboardNewsImages(
-    HomeDashboardData? previous,
-    HomeDashboardData next,
-  ) {
-    if (previous == null) return next;
-    return HomeDashboardData(
-      scheduleStatus: next.scheduleStatus,
-      assignmentsStatus: next.assignmentsStatus,
-      profile: next.profile,
-      scheduleDate: next.scheduleDate,
-      todayLessons: next.todayLessons,
-      assignments: next.assignments,
-      news: next.news,
-      readNotificationIds: next.readNotificationIds,
-      unreadMessagesCount: next.unreadMessagesCount,
-      warning: next.warning,
-      groupActions: next.groupActions,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final data = _data;
@@ -832,6 +860,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
             child: StudentHomeView(
               data: _toPresentationData(data),
+              newsLoading: _cachedContentAllowed &&
+                  widget.homeContent?.isDenied('news') != true && data.newsLoading,
               contentLayoutVisit: _contentLayoutVisit,
               notificationCount: _unreadNotificationCount,
               onRefresh: _refreshFromGesture,
@@ -988,6 +1018,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           gradientColors: item.gradientColors,
           variant: item.variant,
           imageBytes: item.imageBytes,
+          imageProvider: item.imageBytes == null ? null : _newsCoverProvider(item.imageBytes!),
           imageFocus: item.imageFocus,
           overlayDarken: item.overlayDarken,
           publishedAt: item.publishedAt,

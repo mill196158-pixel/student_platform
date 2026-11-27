@@ -15,6 +15,7 @@ class HomeDashboardData {
   final List<Lesson> todayLessons;
   final List<HomeAssignmentPreview> assignments;
   final List<HomeNewsItem> news;
+  final bool newsLoading;
   final Set<String> readNotificationIds;
   final int unreadMessagesCount;
   final String? warning;
@@ -28,11 +29,28 @@ class HomeDashboardData {
     required this.todayLessons,
     required this.assignments,
     required this.news,
+    this.newsLoading = false,
     this.readNotificationIds = const {},
     this.unreadMessagesCount = 0,
     this.warning,
     this.groupActions = const [],
   });
+
+  HomeDashboardData withNews(List<HomeNewsItem> items, {bool? loading}) =>
+      HomeDashboardData(
+        scheduleStatus: scheduleStatus,
+        assignmentsStatus: assignmentsStatus,
+        profile: profile,
+        scheduleDate: scheduleDate,
+        todayLessons: todayLessons,
+        assignments: assignments,
+        news: items,
+        newsLoading: loading ?? newsLoading,
+        readNotificationIds: readNotificationIds,
+        unreadMessagesCount: unreadMessagesCount,
+        warning: warning,
+        groupActions: groupActions,
+      );
 
   int get lessonsCount => remainingLessons.length;
   int get assignmentsCount => assignments.length;

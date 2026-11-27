@@ -3,65 +3,34 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
-import 'package:student_platform/src/core/optional_image_cache_budget.dart';
 import 'package:student_platform/src/ui/home/public_news_image_cache.dart';
 import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
 
-class _CountingLimit extends OptionalImageCacheBudget {
-  _CountingLimit() : super(roots: () async => []);
-  int writes = 0;
-  @override
-  Future<bool> setLimit(int value) async {
-    writes++;
-    return true;
-  }
-}
-
 void main() {
-  testWidgets('a revoked offline permit blocks both outstanding dialogs',
+  testWidgets('revoked offline permit blocks pending confirmation',
       (tester) async {
     var allowed = true, clears = 0;
-    final budget = _CountingLimit();
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
       canAccess: () => allowed,
-      budget: budget,
-      measure: () async => InventorySnapshot(
-          startedAt: DateTime.now(),
-          finishedAt: DateTime.now(),
-          observations: []),
-      measureAttachments: () async => const AttachmentStorageReport(),
+      measure: () async => measurement(),
       clearNews: () async {
         clears++;
         return const PublicNewsClearResult(PublicNewsClearStatus.complete);
       },
     )));
     await tester.pumpAndSettle();
-    final limit = find.widgetWithText(OutlinedButton, 'Изменить целевой лимит');
-    await tester.scrollUntilVisible(limit, 170);
-    await tester.pumpAndSettle();
-    await tester.tap(limit);
+    await tester.tap(find.text('Очистить кэш'));
     await tester.pumpAndSettle();
     allowed = false;
-    await tester.tap(find.text('250 МБ'));
-    await tester.pumpAndSettle();
-    expect(budget.writes, 0);
-
-    allowed = true;
-    final clear = find.text('Очистить кэш публичных новостей');
-    await tester.scrollUntilVisible(clear, 170);
-    await tester.pumpAndSettle();
-    await tester.tap(clear);
-    await tester.pumpAndSettle();
-    allowed = false;
-    await tester.tap(find.text('Удалить копии'));
+    await tester.tap(find.text('Очистить'));
     await tester.pumpAndSettle();
     expect(clears, 0);
   });
 
-  testWidgets('real collector shows named partial estimates without cleanup',
+  testWidgets(
+      'only the replaceable total is shown and inventory leaves protected bytes intact',
       (tester) async {
     late Directory root;
     final result = await tester.runAsync(() async {
@@ -98,51 +67,33 @@ void main() {
     });
     expect(result, isNotNull);
     await tester.pumpWidget(MaterialApp(
-        home: CacheDiagnosticsScreen(
-            measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => result!)));
+        home: CacheDiagnosticsScreen(measure: () async => result!)));
     await tester.pump();
-    expect(find.text('Частичная оценка'), findsOneWidget);
-    expect(find.textContaining('Логический размер'), findsNothing);
-    await tester.scrollUntilVisible(find.text('Дополнительно'), 260);
-    await tester.tap(find.text('Дополнительно'));
-    await tester.pumpAndSettle();
-    expect(
-        find.text('Логический размер подтверждённой части истории: неизвестно'),
-        findsOneWidget);
-    await tester.scrollUntilVisible(
-        find.textContaining('не общий размер'), 240);
-    expect(find.textContaining('не общий размер'), findsOneWidget);
+    expect(find.text('20 Б'), findsOneWidget);
+    expect(find.text('3 Б'), findsNothing);
+    expect(find.text('Дополнительно'), findsNothing);
   });
 
-  testWidgets('attachment sizes display independently and never invoke cleanup',
+  testWidgets('resume refreshes the total automatically without clearing',
       (tester) async {
-    final busy = Completer<InventorySnapshot>();
-    var calls = 0;
+    var measured = 21, clears = 0;
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
-      measure: () => busy.future,
-      measureAttachments: () async => const AttachmentStorageReport(
-          authorizedFilesBytes: 1500000, downloadedFilesBytes: 352),
+      measure: () async => measurement(measured),
       clearNews: () async {
-        calls++;
+        clears++;
         return const PublicNewsClearResult(PublicNewsClearStatus.complete);
       },
     )));
     await tester.pump();
-    expect(find.text('Скачанные вложения: 352 Б'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Дополнительно'), 260);
-    await tester.tap(find.text('Дополнительно'));
-    await tester.pumpAndSettle();
-    expect(find.text('Рабочие файлы чатов и данные доступа: 1.5 МБ'),
-        findsOneWidget);
-    expect(find.text('Копии для просмотра: неизвестно'), findsOneWidget);
-    expect(calls, 0);
-    busy.complete(InventorySnapshot(
-        startedAt: DateTime.now(),
-        finishedAt: DateTime.now(),
-        observations: []));
+    expect(find.text('21 Б'), findsOneWidget);
+    measured = 64;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
+    expect(find.text('64 Б'), findsOneWidget);
+    expect(find.text('Обновить'), findsNothing);
+    expect(clears, 0);
   });
 
   testWidgets(
@@ -159,7 +110,6 @@ void main() {
             finishedAt: DateTime.now(),
             observations: []);
       },
-      measureAttachments: () async => const AttachmentStorageReport(),
       clearNews: () async {
         clears++;
         if (clears == 1) return first.future;
@@ -169,8 +119,7 @@ void main() {
       },
     )));
     await tester.pumpAndSettle();
-    final action =
-        find.widgetWithText(OutlinedButton, 'Очистить кэш публичных новостей');
+    final action = find.widgetWithText(OutlinedButton, 'Очистить кэш');
     Future<void> openDialog() async {
       await tester.ensureVisible(action);
       await tester.tap(action);
@@ -179,7 +128,7 @@ void main() {
 
     Future<void> confirm() async {
       await openDialog();
-      await tester.tap(find.text('Удалить копии'));
+      await tester.tap(find.text('Очистить'));
       await tester.pumpAndSettle();
     }
 
@@ -194,13 +143,13 @@ void main() {
     first.complete(const PublicNewsClearResult(PublicNewsClearStatus.partial,
         filesRemoved: 3));
     await tester.pumpAndSettle();
-    expect(find.textContaining('частично. Удалено файлов: 3.'), findsOneWidget);
+    expect(
+        find.textContaining('Часть временных файлов осталась'), findsOneWidget);
     expect(measurements, 2);
     await confirm();
-    expect(
-        find.textContaining('Не удалось подтвердить очистку'), findsOneWidget);
+    expect(find.textContaining('Не удалось очистить кэш'), findsOneWidget);
     await confirm();
-    expect(find.text('Очистка завершена. Удалено файлов: 2.'), findsOneWidget);
+    expect(find.text('Кэш очищен.'), findsOneWidget);
     expect(clears, 3);
   });
 
@@ -270,10 +219,10 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
             timeout: const Duration(seconds: 1),
-            measureAttachments: () async => const AttachmentStorageReport(),
             measure: () => pending.future)));
     await tester.pump(const Duration(seconds: 2));
-    expect(find.text('Сейчас недоступно'), findsOneWidget);
+    expect(find.text('0 Б'), findsNothing);
+    expect(find.text('Очистить кэш'), findsOneWidget);
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     pending.complete(InventorySnapshot(
         startedAt: DateTime.now(),
@@ -283,3 +232,12 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 }
+
+InventorySnapshot measurement([int? bytes]) => InventorySnapshot(
+      startedAt: DateTime(2026, 11, 27),
+      finishedAt: DateTime(2026, 11, 27),
+      observations: [
+        InventoryObservation(
+            'public_news_blobs_v2', InventoryClass.optional, bytes)
+      ],
+    );

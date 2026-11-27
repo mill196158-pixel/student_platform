@@ -290,6 +290,9 @@ class _StoryHero extends StatelessWidget {
               Positioned.fill(
                 child: NewsImageFrame(
                   bytes: item.imageBytes,
+                  imageProvider: item.imageBytes?.isNotEmpty == true
+                      ? null
+                      : item.imageProvider,
                   colors: colors,
                   alignment: item.imageFocus,
                   isLoading: false,

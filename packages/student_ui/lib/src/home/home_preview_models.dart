@@ -143,6 +143,7 @@ class StudentHomeNews {
     required this.gradientColors,
     this.variant = StudentHomeNewsVariant.gradientText,
     this.imageBytes,
+    this.imageProvider,
     this.imageFocus = Alignment.center,
     this.overlayDarken = 0.42,
     this.publishedAt,
@@ -159,9 +160,12 @@ class StudentHomeNews {
   /// Optional publication timestamp shown in the full story view.
   final DateTime? publishedAt;
 
-  /// Optional local/remote decoded image bytes for card variants that use media.
+  /// Optional encoded image bytes for card variants that use media.
   /// Kept as presentation data only — storage and upload live outside this package.
   final Uint8List? imageBytes;
+
+  /// A provider prepared by the host to draw the cached cover on its first frame.
+  final ImageProvider<Object>? imageProvider;
 
   /// Focal point used with [BoxFit.cover] for news images.
   final Alignment imageFocus;
@@ -169,7 +173,7 @@ class StudentHomeNews {
   /// Darken strength for [StudentHomeNewsVariant.imageOverlay] (0..1).
   final double overlayDarken;
 
-  bool get hasImage => imageBytes != null && imageBytes!.isNotEmpty;
+  bool get hasImage => imageProvider != null || imageBytes?.isNotEmpty == true;
 
   /// Card variants that expect a photo surface (skeleton until bytes arrive).
   bool get usesImage =>
@@ -186,6 +190,7 @@ class StudentHomeNews {
     List<Color>? gradientColors,
     StudentHomeNewsVariant? variant,
     Uint8List? imageBytes,
+    ImageProvider<Object>? imageProvider,
     bool clearImageBytes = false,
     Alignment? imageFocus,
     double? overlayDarken,
@@ -200,6 +205,12 @@ class StudentHomeNews {
       gradientColors: gradientColors ?? this.gradientColors,
       variant: variant ?? this.variant,
       imageBytes: clearImageBytes ? null : (imageBytes ?? this.imageBytes),
+      imageProvider: clearImageBytes
+          ? null
+          : imageProvider ??
+              (imageBytes == null || identical(imageBytes, this.imageBytes)
+                  ? this.imageProvider
+                  : null),
       imageFocus: imageFocus ?? this.imageFocus,
       overlayDarken: overlayDarken ?? this.overlayDarken,
       publishedAt: publishedAt ?? this.publishedAt,

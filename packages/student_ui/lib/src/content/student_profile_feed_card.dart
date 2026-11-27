@@ -24,6 +24,7 @@ class StudentProfileFeedCard extends StatelessWidget {
     this.imageLoading = false,
     this.imageState,
     this.iconBytes,
+    this.compact = false,
   });
 
   final ProfileFeedPayload payload;
@@ -36,6 +37,11 @@ class StudentProfileFeedCard extends StatelessWidget {
   final bool imageLoading;
   final ContentImageRenderState? imageState;
   final Uint8List? iconBytes;
+  final bool compact;
+
+  double get _iconGap => compact ? 5 : 8;
+  double get _subtitleGap => compact ? 4 : 6;
+  double get _actionGap => compact ? 6 : 10;
 
   ContentImageRenderState get resolvedImageState {
     if (imageState != null) return imageState!;
@@ -115,14 +121,14 @@ class _FeedCardShell extends StatelessWidget {
   const _FeedCardShell({
     required this.card,
     required this.child,
-    this.padding = const EdgeInsets.all(16),
+    this.padding,
     this.decoration,
     this.clipBehavior = Clip.none,
   });
 
   final StudentProfileFeedCard card;
   final Widget child;
-  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry? padding;
   final BoxDecoration? decoration;
   final Clip clipBehavior;
 
@@ -132,7 +138,7 @@ class _FeedCardShell extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 6),
       clipBehavior: clipBehavior,
-      padding: padding,
+      padding: padding ?? EdgeInsets.all(card.compact ? 12 : 16),
       decoration: decoration ??
           BoxDecoration(
             borderRadius: BorderRadius.circular(20),
@@ -310,7 +316,7 @@ class _FeedGradientTextLayout extends StatelessWidget {
               color: t.accent,
               size: 22,
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: card._iconGap),
           ],
           const Spacer(),
           Text(
@@ -322,7 +328,7 @@ class _FeedGradientTextLayout extends StatelessWidget {
               color: t.titleColor,
             ),
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: card._subtitleGap),
           Text(
             card.payload.subtitle,
             maxLines: 2,
@@ -332,9 +338,11 @@ class _FeedGradientTextLayout extends StatelessWidget {
               color: t.bodyColor,
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: card._actionGap),
           Text(
             card.payload.ctaLabel,
+            maxLines: card.compact ? 1 : null,
+            overflow: card.compact ? TextOverflow.ellipsis : null,
             style: t.theme.textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w800,
               color: t.accent,
@@ -433,7 +441,7 @@ class _FeedImageOverlayLayout extends StatelessWidget {
             overlayOpacity: overlay,
           ),
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(card.compact ? 12 : 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -456,7 +464,7 @@ class _FeedImageOverlayLayout extends StatelessWidget {
                     color: Colors.white,
                   ),
                 ),
-                const SizedBox(height: 6),
+                SizedBox(height: card._subtitleGap),
                 Text(
                   card.payload.subtitle,
                   maxLines: 2,
@@ -466,9 +474,11 @@ class _FeedImageOverlayLayout extends StatelessWidget {
                     color: Colors.white.withValues(alpha: 0.88),
                   ),
                 ),
-                const SizedBox(height: 10),
+                SizedBox(height: card._actionGap),
                 Text(
                   card.payload.ctaLabel,
+                  maxLines: card.compact ? 1 : null,
+                  overflow: card.compact ? TextOverflow.ellipsis : null,
                   style: t.theme.textTheme.labelLarge?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: Colors.white,
@@ -522,7 +532,9 @@ class _FeedImageTopTextLayout extends StatelessWidget {
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              padding: card.compact
+                  ? const EdgeInsets.fromLTRB(12, 8, 12, 10)
+                  : const EdgeInsets.fromLTRB(16, 10, 16, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -539,6 +551,8 @@ class _FeedImageTopTextLayout extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     card.payload.ctaLabel,
+                    maxLines: card.compact ? 2 : null,
+                    overflow: card.compact ? TextOverflow.ellipsis : null,
                     style: t.theme.textTheme.labelLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: t.accent,
@@ -562,6 +576,16 @@ class _FeedCompactIconLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = _FeedTheme(context, card);
+    final action = Text(
+      card.payload.ctaLabel,
+      maxLines: card.compact ? 2 : null,
+      overflow: card.compact ? TextOverflow.ellipsis : null,
+      textAlign: card.compact ? TextAlign.end : null,
+      style: t.theme.textTheme.labelLarge?.copyWith(
+        fontWeight: FontWeight.w800,
+        color: t.accent,
+      ),
+    );
     return _FeedCardShell(
       card: card,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -602,13 +626,11 @@ class _FeedCompactIconLayout extends StatelessWidget {
               ],
             ),
           ),
-          Text(
-            card.payload.ctaLabel,
-            style: t.theme.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: t.accent,
-            ),
-          ),
+          if (card.compact) ...[
+            const SizedBox(width: 8),
+            Flexible(child: action),
+          ] else
+            action,
         ],
       ),
     );
@@ -662,9 +684,11 @@ class _FeedAccentInfoLayout extends StatelessWidget {
               color: t.titleColor,
             ),
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: card._subtitleGap),
           Text(
             card.payload.ctaLabel,
+            maxLines: card.compact ? 1 : null,
+            overflow: card.compact ? TextOverflow.ellipsis : null,
             style: t.theme.textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w800,
               color: t.accent,
@@ -711,7 +735,7 @@ class _FeedNoImageLayout extends StatelessWidget {
               color: t.titleColor,
             ),
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: card._subtitleGap),
           Text(
             card.payload.subtitle,
             maxLines: 2,
@@ -721,9 +745,11 @@ class _FeedNoImageLayout extends StatelessWidget {
               color: t.bodyColor,
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: card._actionGap),
           Text(
             card.payload.ctaLabel,
+            maxLines: card.compact ? 1 : null,
+            overflow: card.compact ? TextOverflow.ellipsis : null,
             style: t.theme.textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w800,
               color: t.accent,
@@ -919,9 +945,10 @@ class _StudentProfileFeedCarouselState
   @override
   Widget build(BuildContext context) {
     if (widget.cards.isEmpty) return const SizedBox.shrink();
+    final textScale = MediaQuery.textScalerOf(context).scale(16) / 16;
     return SizedBox(
       // Allow two title and subtitle lines alongside the badge, icon and CTA.
-      height: 100 + MediaQuery.textScalerOf(context).scale(112),
+      height: 184 + 136 * (textScale - 1).clamp(0, double.infinity),
       child: PageView.builder(
         controller: _controller,
         itemCount: widget.cards.length,
@@ -932,6 +959,7 @@ class _StudentProfileFeedCarouselState
         itemBuilder: (context, index) {
           final card = widget.cards[index];
           return StudentProfileFeedCard(
+            compact: true,
             payload: card.payload,
             showDemoBadge: card.showDemoBadge,
             onTap: () => widget.onTap(card),

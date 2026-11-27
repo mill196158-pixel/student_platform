@@ -4,6 +4,8 @@ import '../home_preview_models.dart';
 import 'news_image_frame.dart';
 
 class StudentHomeNewsFeed extends StatelessWidget {
+  static const height = 128.0;
+
   const StudentHomeNewsFeed({
     required this.news,
     required this.onNewsTap,
@@ -20,20 +22,24 @@ class StudentHomeNewsFeed extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (news.isEmpty) return const SizedBox.shrink();
+    final indexById = {for (var i = 0; i < news.length; i++) news[i].id: i};
 
     // Vertical gaps between home sections are owned by [StudentHomeView].
     // Clip shadows so they do not inflate the visual gap under the strip.
     return SizedBox(
-      height: 128,
+      height: height,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.hardEdge,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         itemCount: news.length,
+        findItemIndexCallback: (key) =>
+            key is ValueKey<String> ? indexById[key.value] : null,
         separatorBuilder: (_, __) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           final item = news[index];
           return StudentHomeNewsCard(
+            key: ValueKey(item.id),
             item: item,
             onTap: onNewsTap == null ? null : () => onNewsTap!(index),
             isSelected: item.id == selectedNewsId,
@@ -95,7 +101,7 @@ class _StudentHomeNewsCardState extends State<StudentHomeNewsCard> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           width: 156,
-          height: 128,
+          height: StudentHomeNewsFeed.height,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(26),
@@ -419,6 +425,7 @@ class _NewsImageBackground extends StatelessWidget {
 
     return NewsImageFrame(
       bytes: item.imageBytes,
+      imageProvider: item.imageProvider,
       colors: skeletonColors,
       alignment: item.imageFocus,
       isLoading: item.usesImage && !item.hasImage,

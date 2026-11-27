@@ -1,15 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:student_platform/src/core/optional_image_cache_budget.dart';
-import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
 import 'package:student_platform/src/ui/home/news_image_disk_cache.dart';
-import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
 import 'package:student_ui/student_ui.dart';
 
 void main() {
@@ -180,51 +177,6 @@ void main() {
     }
     memory.clear();
     expect(await disk.peek(key), bytes);
-  });
-
-  testWidgets('settings applies chosen limit to the same admission budget',
-      (tester) async {
-    late OptionalImageCacheBudget b;
-    await tester.runAsync(() async {
-      b = OptionalImageCacheBudget(
-          roots: () async => [root], persistPolicy: true);
-      await b.waitForPolicy();
-      await b.refreshForTesting();
-    });
-    final snapshot = InventorySnapshot(
-        startedAt: DateTime.now(),
-        finishedAt: DateTime.now(),
-        observations: []);
-    await tester.pumpWidget(MaterialApp(
-        home: CacheDiagnosticsScreen(
-            measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot,
-            budget: b)));
-    await tester.pumpAndSettle();
-    final limit = find.widgetWithText(OutlinedButton, 'Изменить целевой лимит');
-    await tester.scrollUntilVisible(limit, 170);
-    await tester.pumpAndSettle();
-    await tester.tap(limit);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('250 МБ'));
-    await tester.pumpAndSettle();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    for (var i = 0; i < 20 && b.policyBusy; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(b.limitBytes, 250000000);
-    await tester.drag(find.byType(ListView), const Offset(0, 700));
-    await tester.pump();
-    expect(find.text('Целевой лимит — 250.0 МБ'), findsOneWidget);
-    expect(find.textContaining('часть подтверждённой истории чатов'),
-        findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Дополнительно'), 180);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Дополнительно'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('сохранённые офлайн-файлы защищены'),
-        findsOneWidget);
   });
 }
 

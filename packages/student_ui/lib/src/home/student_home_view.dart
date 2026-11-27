@@ -52,6 +52,7 @@ class StudentHomeView extends StatelessWidget {
     this.onRefresh,
     this.onNotificationsTap,
     this.onNewsTap,
+    this.newsLoading = false,
     this.onSummaryTap,
     this.onGroupActionTap,
     this.onGroupActionDelete,
@@ -79,6 +80,11 @@ class StudentHomeView extends StatelessWidget {
   final Future<void> Function()? onRefresh;
   final VoidCallback? onNotificationsTap;
   final ValueChanged<int>? onNewsTap;
+
+  /// Initial news metadata is pending for this visit. Once a feed is known,
+  /// keep it visible during refreshes instead of returning to the pending strip.
+  final bool newsLoading;
+
   final VoidCallback? onSummaryTap;
   final ValueChanged<StudentHomeGroupAction>? onGroupActionTap;
   final ValueChanged<StudentHomeGroupAction>? onGroupActionDelete;
@@ -142,22 +148,23 @@ class StudentHomeView extends StatelessWidget {
     yield _sectionSpacer;
   }
 
-  Iterable<Widget> _newsSlivers() sync* {
-    if (data.news.isEmpty) return;
+  Iterable<Widget> _newsSlivers({bool retainEmptySlot = false}) sync* {
+    if (!_hasNewsSection && !retainEmptySlot) return;
     yield SliverToBoxAdapter(
       key: const ValueKey('student-home-news'),
-      child: _AnimatedEntry(
-        delay: const Duration(milliseconds: 20),
-        child: StudentHomeNewsFeed(
-          news: data.news,
-          onNewsTap: onNewsTap,
-          selectedNewsId: selectedNewsId,
-          adminHighlightColor: adminNewsHighlightColor,
-        ),
-      ),
+      child: data.news.isEmpty
+          ? _NewsStatusStrip(loading: newsLoading)
+          : StudentHomeNewsFeed(
+              news: data.news,
+              onNewsTap: onNewsTap,
+              selectedNewsId: selectedNewsId,
+              adminHighlightColor: adminNewsHighlightColor,
+            ),
     );
     yield _sectionSpacer;
   }
+
+  bool get _hasNewsSection => newsLoading || data.news.isNotEmpty;
 
   @override
   Widget build(BuildContext context) => contentLayoutVisit == null
@@ -169,6 +176,7 @@ class StudentHomeView extends StatelessWidget {
     required List<StudentHomePromoPlacement> placements,
     Map<Object, String>? configuredSlots,
     bool newsInConfiguredSlot = true,
+    bool retainEmptyNewsSlot = false,
     List<Widget> appendedSections = const [],
   }) {
     Iterable<Widget> promosFor(String slot) sync* {
@@ -182,6 +190,10 @@ class StudentHomeView extends StatelessWidget {
         }
       }
     }
+
+    Widget systemSection(Widget child, int delay) => contentLayoutVisit != null
+        ? child
+        : _AnimatedEntry(delay: Duration(milliseconds: delay), child: child);
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final scrollView = CustomScrollView(
@@ -197,15 +209,15 @@ class StudentHomeView extends StatelessWidget {
           ),
         ),
         _sectionSpacer,
-        if (newsInConfiguredSlot) ..._newsSlivers(),
+        if (newsInConfiguredSlot)
+          ..._newsSlivers(retainEmptySlot: retainEmptyNewsSlot),
         ...promosFor('after_news'),
         // System block: day summary (immovable).
         SliverToBoxAdapter(
           key: const ValueKey('student-home-summary'),
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 70),
-            child: _TodaySummaryCard(
-                data: data, onTap: onSummaryTap, guest: guest),
+          child: systemSection(
+            _TodaySummaryCard(data: data, onTap: onSummaryTap, guest: guest),
+            70,
           ),
         ),
         _sectionSpacer,
@@ -213,9 +225,8 @@ class StudentHomeView extends StatelessWidget {
         // System block: assignments (immovable).
         SliverToBoxAdapter(
           key: const ValueKey('student-home-assignments'),
-          child: _AnimatedEntry(
-            delay: const Duration(milliseconds: 120),
-            child: _AssignmentsSection(
+          child: systemSection(
+            _AssignmentsSection(
               data: data,
               hiddenAssignmentIds: hiddenAssignmentIds,
               markingDoneAssignmentIds: markingDoneAssignmentIds,
@@ -225,6 +236,7 @@ class StudentHomeView extends StatelessWidget {
               onGroupActionTap: onGroupActionTap,
               onGroupActionDelete: onGroupActionDelete,
             ),
+            120,
           ),
         ),
         _sectionSpacer,
@@ -255,6 +267,50 @@ class StudentHomeView extends StatelessWidget {
   }
 }
 
+class _NewsStatusStrip extends StatelessWidget {
+  const _NewsStatusStrip({required this.loading});
+
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: SizedBox(
+        height: StudentHomeNewsFeed.height,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerLow,
+            border: Border.all(color: colors.outlineVariant),
+            borderRadius: BorderRadius.circular(26),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.newspaper_outlined,
+                    color: colors.onSurfaceVariant, size: 22),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    loading
+                        ? 'Загружаем новости…'
+                        : 'Пока нет новостей для показа',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: colors.onSurfaceVariant),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 Object _placementIdentity(StudentHomePromoPlacement card) =>
     card.anchorKey ?? card.payload;
 
@@ -272,6 +328,7 @@ class _StudentHomeVisitState extends State<_StudentHomeVisit> {
   final _configuredSlots = <Object, String>{};
   final _appendedOrder = <Object>{};
   bool _newsInConfiguredSlot = false;
+  bool _retainInitiallyEmptyNewsSlot = false;
 
   @override
   void initState() {
@@ -281,7 +338,8 @@ class _StudentHomeVisitState extends State<_StudentHomeVisit> {
 
   void _adoptCurrentLayout() {
     final view = widget.view;
-    _newsInConfiguredSlot = view.data.news.isNotEmpty;
+    _newsInConfiguredSlot = view._hasNewsSection;
+    _retainInitiallyEmptyNewsSlot = view.newsLoading && view.data.news.isEmpty;
     _configuredSlots
       ..clear()
       ..addEntries(view
@@ -301,11 +359,18 @@ class _StudentHomeVisitState extends State<_StudentHomeVisit> {
 
     final visiblePromos =
         view._resolvedPlacements().map(_placementIdentity).toSet();
+    // A cold visit keeps its loading slot if the first result is empty. Actual
+    // news can still disappear when access changes, and the next visit reflows.
+    if (view.data.news.isNotEmpty) {
+      _retainInitiallyEmptyNewsSlot = false;
+    } else if (view.newsLoading) {
+      _retainInitiallyEmptyNewsSlot = true;
+    }
+    final showNews = view._hasNewsSection || _retainInitiallyEmptyNewsSlot;
     _configuredSlots.removeWhere((id, _) => !visiblePromos.contains(id));
-    _appendedOrder.removeWhere((id) => id == _newsSection
-        ? view.data.news.isEmpty
-        : !visiblePromos.contains(id));
-    if (view.data.news.isEmpty) {
+    _appendedOrder.removeWhere(
+        (id) => id == _newsSection ? !showNews : !visiblePromos.contains(id));
+    if (!showNews) {
       _newsInConfiguredSlot = false;
     } else if (!_newsInConfiguredSlot) {
       _appendedOrder.add(_newsSection);
@@ -329,10 +394,11 @@ class _StudentHomeVisitState extends State<_StudentHomeVisit> {
       ],
       configuredSlots: _configuredSlots,
       newsInConfiguredSlot: _newsInConfiguredSlot,
+      retainEmptyNewsSlot: _retainInitiallyEmptyNewsSlot,
       appendedSections: [
         for (final section in _appendedOrder)
           if (section == _newsSection)
-            ...view._newsSlivers()
+            ...view._newsSlivers(retainEmptySlot: _retainInitiallyEmptyNewsSlot)
           else if (byIdentity[section] case final card?)
             ...view._promoSlivers(card),
       ],

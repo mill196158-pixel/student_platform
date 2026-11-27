@@ -42,7 +42,7 @@ class AttachedFile {
 }
 
 class Composer extends StatefulWidget {
-  static const _inputButtonHeight = 48.0;
+  static const controlSize = 48.0;
   static const _bodyPadding = EdgeInsets.fromLTRB(12, 10, 12, 6);
 
   static double bottomPaddingOf(BuildContext context) {
@@ -51,9 +51,9 @@ class Composer extends StatefulWidget {
     return math.min(safeBottom, math.max(18.0, safeBottom - 12));
   }
 
-  // One input row, its two border edges and the frame's top border.
+  // One input row and the frame's top border.
   static double restingHeightOf(BuildContext context) =>
-      _inputButtonHeight + 3 + _bodyPadding.vertical + bottomPaddingOf(context);
+      controlSize + 1 + _bodyPadding.vertical + bottomPaddingOf(context);
 
   final TextEditingController controller;
   final String? pickedImagePath;
@@ -105,6 +105,28 @@ class Composer extends StatefulWidget {
 }
 
 class _ComposerState extends State<Composer> {
+  static const _messageHint = 'Сообщение';
+  static const _attachmentSize = Size(44, Composer.controlSize);
+
+  TextStyle _hintStyle(BuildContext context, double width) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodyMedium!.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      letterSpacing: 0,
+    );
+    final painter = TextPainter(
+      text: TextSpan(text: _messageHint, style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final fit = math.min(1.0, width / painter.width);
+    painter.dispose();
+    // Preserve text scaling for the message itself. Only the single-line
+    // prompt needs to fit beside the two attachment controls on narrow screens.
+    return style.copyWith(fontSize: style.fontSize! * fit);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -233,7 +255,7 @@ class _ComposerState extends State<Composer> {
                 widget.leftButton ?? const SizedBox(width: 0),
                 if (widget.leftButton != null) const SizedBox(width: 8),
                 Expanded(
-                  child: Container(
+                  child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: theme.colorScheme.surfaceContainerHigh,
                       borderRadius: BorderRadius.circular(24),
@@ -241,139 +263,161 @@ class _ComposerState extends State<Composer> {
                           color:
                               theme.colorScheme.outline.withValues(alpha: .2)),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: Shortcuts(
-                            shortcuts: widget.onPasteFile == null
-                                ? const <ShortcutActivator, Intent>{}
-                                : const <ShortcutActivator, Intent>{
-                                    SingleActivator(
-                                      LogicalKeyboardKey.keyV,
-                                      control: true,
-                                    ): _PasteFileIntent(),
-                                    SingleActivator(
-                                      LogicalKeyboardKey.keyV,
-                                      meta: true,
-                                    ): _PasteFileIntent(),
-                                  },
-                            child: Actions(
-                              actions: <Type, Action<Intent>>{
-                                _PasteFileIntent:
-                                    CallbackAction<_PasteFileIntent>(
-                                  onInvoke: (_) {
-                                    widget.onPasteFile?.call();
-                                    return null;
-                                  },
-                                ),
-                              },
-                              child: TextField(
-                                focusNode: widget.focusNode,
-                                controller: widget.controller,
-                                keyboardType: TextInputType.multiline,
-                                textInputAction: TextInputAction.send,
-                                minLines: 1,
-                                maxLines: 6,
-                                decoration: const InputDecoration(
-                                  hintText: 'Сообщение',
-                                  filled: false,
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                  disabledBorder: InputBorder.none,
-                                  errorBorder: InputBorder.none,
-                                  focusedErrorBorder: InputBorder.none,
-                                  isCollapsed: true,
-                                  contentPadding:
-                                      EdgeInsets.symmetric(vertical: 12),
-                                ),
-                                contextMenuBuilder: widget.onPasteFile == null
-                                    ? null
-                                    : (context, editableTextState) {
-                                        final items = editableTextState
-                                            .contextMenuButtonItems
-                                            .where((item) =>
-                                                item.type !=
-                                                ContextMenuButtonType.paste);
-                                        return AdaptiveTextSelectionToolbar
-                                            .buttonItems(
-                                          anchors: editableTextState
-                                              .contextMenuAnchors,
-                                          buttonItems: [
-                                            ContextMenuButtonItem(
-                                              label: 'Вставить',
-                                              onPressed: () {
-                                                ContextMenuController
-                                                    .removeAny();
-                                                widget.onPasteFile!();
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 10, right: 2),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: Shortcuts(
+                              shortcuts: widget.onPasteFile == null
+                                  ? const <ShortcutActivator, Intent>{}
+                                  : const <ShortcutActivator, Intent>{
+                                      SingleActivator(
+                                        LogicalKeyboardKey.keyV,
+                                        control: true,
+                                      ): _PasteFileIntent(),
+                                      SingleActivator(
+                                        LogicalKeyboardKey.keyV,
+                                        meta: true,
+                                      ): _PasteFileIntent(),
+                                    },
+                              child: Actions(
+                                actions: <Type, Action<Intent>>{
+                                  _PasteFileIntent:
+                                      CallbackAction<_PasteFileIntent>(
+                                    onInvoke: (_) {
+                                      widget.onPasteFile?.call();
+                                      return null;
+                                    },
+                                  ),
+                                },
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) => TextField(
+                                    focusNode: widget.focusNode,
+                                    controller: widget.controller,
+                                    keyboardType: TextInputType.multiline,
+                                    textInputAction: TextInputAction.send,
+                                    minLines: 1,
+                                    maxLines: 6,
+                                    textAlignVertical: TextAlignVertical.center,
+                                    decoration: InputDecoration(
+                                      hintText: _messageHint,
+                                      hintStyle: _hintStyle(
+                                        context,
+                                        constraints.maxWidth,
+                                      ),
+                                      hintMaxLines: 1,
+                                      hintFadeDuration: Duration.zero,
+                                      constraints: const BoxConstraints(
+                                        minHeight: Composer.controlSize,
+                                      ),
+                                      filled: false,
+                                      border: InputBorder.none,
+                                      enabledBorder: InputBorder.none,
+                                      focusedBorder: InputBorder.none,
+                                      disabledBorder: InputBorder.none,
+                                      errorBorder: InputBorder.none,
+                                      focusedErrorBorder: InputBorder.none,
+                                      isCollapsed: true,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                              vertical: 4),
+                                    ),
+                                    contextMenuBuilder:
+                                        widget.onPasteFile == null
+                                            ? null
+                                            : (context, editableTextState) {
+                                                final items = editableTextState
+                                                    .contextMenuButtonItems
+                                                    .where((item) =>
+                                                        item.type !=
+                                                        ContextMenuButtonType
+                                                            .paste);
+                                                return AdaptiveTextSelectionToolbar
+                                                    .buttonItems(
+                                                  anchors: editableTextState
+                                                      .contextMenuAnchors,
+                                                  buttonItems: [
+                                                    ContextMenuButtonItem(
+                                                      label: 'Вставить',
+                                                      onPressed: () {
+                                                        ContextMenuController
+                                                            .removeAny();
+                                                        widget.onPasteFile!();
+                                                      },
+                                                    ),
+                                                    ...items,
+                                                  ],
+                                                );
                                               },
-                                            ),
-                                            ...items,
-                                          ],
-                                        );
-                                      },
-                                onSubmitted: (_) => widget.onSend(),
+                                    onSubmitted: (_) => widget.onSend(),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (widget.onAttachFile != null)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (widget.onAttachFile != null)
+                                IconButton(
+                                  icon: const Icon(Icons.attach_file_rounded),
+                                  style: IconButton.styleFrom(
+                                      fixedSize: _attachmentSize),
+                                  constraints: const BoxConstraints.tightFor(
+                                      width: 44, height: Composer.controlSize),
+                                  padding: EdgeInsets.zero,
+                                  onPressed: widget.onAttachFile,
+                                  tooltip: 'Прикрепить файл',
+                                ),
                               IconButton(
-                                icon: const Icon(Icons.attach_file_rounded),
-                                constraints: const BoxConstraints(
-                                    minWidth: 40,
-                                    minHeight: Composer._inputButtonHeight),
+                                icon: const Icon(Icons.image_outlined),
+                                style: IconButton.styleFrom(
+                                    fixedSize: _attachmentSize),
+                                constraints: const BoxConstraints.tightFor(
+                                    width: 44, height: Composer.controlSize),
                                 padding: EdgeInsets.zero,
-                                onPressed: widget.onAttachFile,
-                                tooltip: 'Прикрепить файл',
+                                onPressed: widget.onPickImage,
+                                tooltip: 'Прикрепить изображение',
                               ),
-                            IconButton(
-                              icon: const Icon(Icons.image_outlined),
-                              constraints: const BoxConstraints(
-                                  minWidth: 40,
-                                  minHeight: Composer._inputButtonHeight),
-                              padding: EdgeInsets.zero,
-                              onPressed: widget.onPickImage,
-                              tooltip: 'Прикрепить изображение',
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: (widget.isUploading || widget.isSending)
-                        ? theme.colorScheme.onSurface.withValues(alpha: 0.12)
-                        : theme.colorScheme.primary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      widget.hasFailedUploads
-                          ? Icons.error_outline
-                          : Icons.arrow_upward_rounded,
-                      color: (widget.isUploading ||
+                SizedBox.square(
+                  dimension: Composer.controlSize,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: (widget.isUploading || widget.isSending)
+                          ? theme.colorScheme.onSurface.withValues(alpha: 0.12)
+                          : theme.colorScheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      icon: Icon(
+                        widget.hasFailedUploads
+                            ? Icons.error_outline
+                            : Icons.arrow_upward_rounded,
+                        color: (widget.isUploading ||
+                                widget.isSending ||
+                                widget.hasFailedUploads)
+                            ? Colors.grey
+                            : Colors.white,
+                      ),
+                      onPressed: (widget.isUploading ||
                               widget.isSending ||
                               widget.hasFailedUploads)
-                          ? Colors.grey
-                          : Colors.white,
+                          ? null
+                          : widget.onSend,
+                      tooltip: widget.hasFailedUploads
+                          ? 'Повторите или удалите файл'
+                          : 'Отправить',
                     ),
-                    onPressed: (widget.isUploading ||
-                            widget.isSending ||
-                            widget.hasFailedUploads)
-                        ? null
-                        : widget.onSend,
-                    tooltip: widget.hasFailedUploads
-                        ? 'Повторите или удалите файл'
-                        : 'Отправить',
                   ),
                 ),
               ],

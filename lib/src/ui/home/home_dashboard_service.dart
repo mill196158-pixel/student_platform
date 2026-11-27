@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -128,12 +129,15 @@ class HomeDashboardService {
   final AuthSessionScope? _sessionScope;
   final HomeSnapshotCache? _snapshotCache;
   final HomeSnapshotCache? _projectSnapshotCache;
+  final _preparedCovers = <String, (NewsImageCacheKey, (int, int), Uint8List)>{};
+  (String?, int?)? _preparedCoverOwner;
   bool _disposed = false;
   int _loadRevision = 0;
 
   void dispose() {
     _disposed = true;
     _loadRevision++;
+    _preparedCovers.clear();
     if (_ownsHttpClient) _http.close();
   }
 
@@ -163,6 +167,11 @@ class HomeDashboardService {
         _sb.auth.currentUser?.id == userId &&
         (source == null || (authScope != null && source.isCurrent(authScope)));
     if (!current()) throw HomeLoadCancelled();
+    final coverOwner = (userId, source?.generation);
+    if (coverOwner != _preparedCoverOwner) {
+      _preparedCoverOwner = coverOwner;
+      _preparedCovers.clear();
+    }
     final cache = _snapshotCache;
     final cacheScope = userId == null ? null : cache?.captureScope(userId);
     final projectCache = _projectSnapshotCache;
@@ -195,6 +204,8 @@ class HomeDashboardService {
     var assignments = validPrevious?.assignments ?? <HomeAssignmentPreview>[];
     var reads = validPrevious?.readNotificationIds ?? <String>{};
     var news = validPrevious?.news ?? <HomeNewsItem>[];
+    var initialNewsRead = validPrevious != null;
+    var newsLoading = validPrevious?.newsLoading ?? true;
     var actions = validPrevious?.groupActions ?? <HomeGroupActionPreview>[];
     String? scheduleStatus = 'Загружаем расписание…';
     String? assignmentsStatus = 'Загружаем ближайшие дела…';
@@ -215,10 +226,11 @@ class HomeDashboardService {
         todayLessons: lessons,
         assignments: assignments.take(4).toList(),
         news: news,
+        newsLoading: newsLoading,
         readNotificationIds: reads,
         groupActions: actions.take(4).toList());
     void publish() {
-      if (current()) onUpdate?.call(snapshot());
+      if (initialNewsRead && current()) onUpdate?.call(snapshot());
     }
 
     var profileConfirmed = false;
@@ -271,8 +283,8 @@ class HomeDashboardService {
       ]);
     }
 
-    // Independent work starts before the remote profile. Media never gates
-    // schedule or assignments; each completed section is painted immediately.
+    // Profile and schedule requests start independently. First publication
+    // joins only the bounded local news read to include any saved covers.
     final profileWork = _loadProfile(
         isCurrent: current,
         fallback: profile.id == userId ? profile : null,
@@ -370,14 +382,19 @@ class HomeDashboardService {
       }),
       _loadPublishedNews(
           previous: news,
+          readLocalFirst: validPrevious == null,
           isCurrent: current,
-          onMetadata: (value) {
+          onLocalReady: (value) {
+            if (!current()) return;
+            initialNewsRead = true;
             news = value;
             publish();
-          }).then((value) {
-        news = value;
-        publish();
-      }),
+          },
+          onMetadata: (value) {
+            news = value;
+            newsLoading = false;
+            publish();
+          }),
       _loadGroupActionDeadlines().timeout(const Duration(seconds: 15)).then(
           (value) {
         actions = value;
@@ -415,79 +432,174 @@ class HomeDashboardService {
   /// - Disk/memory image bytes are attached immediately when available.
   /// - Fresh metadata comes from `get_my_published_news`.
   /// - On network failure the feed + last good images are kept.
-  /// - Refresh never clears working image bytes for an unchanged cache key.
-  Future<List<HomeNewsItem>> _loadPublishedNews({
+  /// - Refresh keeps an already-authorized cover for the same publication and
+  ///   media path, then independently verifies any newer disk cache version.
+  Future<void> _loadPublishedNews({
     List<HomeNewsItem> previous = const [],
-    void Function(List<HomeNewsItem>)? onMetadata,
+    required bool readLocalFirst,
+    required void Function(List<HomeNewsItem>) onLocalReady,
+    required void Function(List<HomeNewsItem>) onMetadata,
     bool Function()? isCurrent,
   }) async {
     final newsUser = _sb.auth.currentUser?.id;
     bool current() =>
         _sb.auth.currentUser?.id == newsUser && (isCurrent?.call() ?? true);
-    final cached = await _newsCache.read(owner: newsUser, isCurrent: current);
-    if (!current()) return const [];
-    List<HomeNewsItem> candidates(List<HomeNewsItem> items, List<HomeNewsItem> prior) {
-      final byId = {for (final item in prior) item.id: item};
-      return items.map((item) {
-        final old = byId[item.id];
-        return old?.imageBytes != null && item.imageCacheKey?.id != null &&
-                old!.imageCacheKey?.id == item.imageCacheKey?.id
-            ? item.copyWith(imageBytes: old.imageBytes)
-            : item;
-      }).toList();
-    }
-    final cachedWithImages = await _hydrateImagesFromDisk(candidates(cached, previous));
-    if (!current()) return const [];
-    if (cachedWithImages.isNotEmpty) onMetadata?.call(cachedWithImages);
-    try {
-      final response = await _sb
-          .rpc('get_my_published_news')
-          .timeout(const Duration(seconds: 12));
-      final rows = _asMapList(response);
-      if (rows.length > 1) rows.sort(_comparePublishedNews);
-      if (!current()) return const [];
-      await _newsCache.write(rows, owner: newsUser, isCurrent: current);
-      if (!current()) return const [];
-      final fresh = rows.map(mapPublishedNews).toList();
-      final merged = await _hydrateImagesFromDisk(candidates(fresh,
-          cachedWithImages.isEmpty ? previous : cachedWithImages));
-      if (!current()) return const [];
-      onMetadata?.call(merged);
-      // Media owns its own deadlines; the dashboard timeout must not discard
-      // a successful cover arriving after other sections have finished.
-      unawaited(_resolveNewsImages(merged, onImage: (items) {
-        if (current()) onMetadata?.call(items);
-      }));
-      return merged;
-    } catch (e) {
-      debugPrint('[home] published news failed: $e');
-      if (cachedWithImages.isNotEmpty) {
-        // Keep last good cache — do not wipe images on network error.
-        return cachedWithImages;
+
+    Future<List<Map<String, dynamic>>?> refresh() async {
+      try {
+        final response = await _sb
+            .rpc('get_my_published_news')
+            .timeout(const Duration(seconds: 12));
+        final payload = response is String ? jsonDecode(response) : response;
+        if (payload is! List || payload.any((row) => row is! Map)) {
+          throw const FormatException('Unexpected news publication result');
+        }
+        final rows = payload.map((row) => Map<String, dynamic>.from(row as Map))
+            .toList();
+        if (rows.length > 1) rows.sort(_comparePublishedNews);
+        return current() ? rows : null;
+      } catch (e) {
+        debugPrint('[home] published news failed: $e');
+        return null;
       }
-      return _sessionScope == null ? _localNews() : const [];
     }
+
+    final refreshing = refresh();
+    final local = readLocalFirst
+        ? await _loadVisibleCachedNews(newsUser, current)
+        : _retainCurrentCovers(previous);
+    if (!current()) return;
+    onLocalReady(local);
+    final rows = await refreshing;
+    if (!current()) return;
+    if (rows == null) {
+      onMetadata(local.isEmpty && _sessionScope == null ? _localNews() : local);
+      if (local.isEmpty) return;
+      unawaited(_hydrateImagesFromDisk(local, keepPrepared: true, current: current)
+          .then((items) {
+        if (current()) onMetadata(items);
+      }));
+      return;
+    }
+    final fresh = rows.map(mapPublishedNews).toList();
+    final paths = {
+      for (final item in fresh)
+        if (item.usesImage) item.id: item.imageCacheKey?.path,
+    };
+    _preparedCovers.removeWhere((id, cover) => paths[id] != cover.$1.path);
+    await _newsCache.write(rows,
+        owner: newsUser,
+        isCurrent: current,
+        savedCoverVersions: {
+          for (final item in fresh)
+            if (_preparedCovers[item.id] case final cover?
+                when cover.$1.path == item.imageCacheKey?.path &&
+                    cover.$1.version != item.imageCacheKey?.version &&
+                    cover.$2 == _publicImages.displayVersion(cover.$1))
+              (item.id, cover.$1.path): cover.$1.version,
+        });
+    if (!current()) return;
+    final prior = {for (final item in local) item.id: item};
+    final merged = _retainCurrentCovers([
+      for (final item in fresh)
+        item.copyWith(imageBytes: prior[item.id]?.imageBytes),
+    ]);
+    onMetadata(merged);
+    // Media owns its own deadlines; a late successful cover can refine the
+    // publication without replacing the rest of the dashboard.
+    unawaited(_resolveNewsImages(merged, current: current, onImage: (items) {
+      if (current()) onMetadata(items);
+    }));
+  }
+
+  Future<List<HomeNewsItem>> _loadVisibleCachedNews(
+      String? owner, bool Function() current) async {
+    var cached = <HomeNewsItem>[];
+    final ready = <int, HomeNewsItem>{};
+    final savedCoverVersions = <(String, String), String>{};
+    var accepting = true;
+    return (() async {
+      cached = await _newsCache.read(
+        owner: owner,
+        isCurrent: current,
+        onSavedCoverVersion: (post, version) => savedCoverVersions[post] = version,
+      );
+      if (!accepting || !current() || cached.isEmpty) return const <HomeNewsItem>[];
+      final first = await _hydrateImagesFromDisk(cached.take(4).toList(),
+        keepPrepared: true,
+        current: () => accepting && current(),
+        onReady: (index, item) => ready[index] = item,
+        savedCoverVersions: savedCoverVersions,
+      );
+      return [...first, ...cached.skip(4)];
+    })().timeout(const Duration(seconds: 1), onTimeout: () {
+      accepting = false;
+      return [for (var index = 0; index < cached.length; index++) ready[index] ?? cached[index]];
+    });
+  }
+
+  List<HomeNewsItem> _retainCurrentCovers(List<HomeNewsItem> items) {
+    return items.map((item) {
+      final key = item.imageCacheKey;
+      if (key != null && _preparedCover(item, key, allowPreviousVersion: true)) return item;
+      return item.imageBytes == null ? item : item.copyWith(clearImageBytes: true);
+    }).toList();
+  }
+
+  bool _preparedCover(HomeNewsItem item, NewsImageCacheKey key,
+      {bool allowPreviousVersion = false}) {
+    final known = _preparedCovers[item.id];
+    return known != null && known.$1.path == key.path &&
+        (allowPreviousVersion || known.$1.version == key.version) &&
+        known.$2 == _publicImages.displayVersion(key) &&
+        identical(known.$3, item.imageBytes);
   }
 
   Future<List<HomeNewsItem>> _hydrateImagesFromDisk(
-    List<HomeNewsItem> items,
-  ) async {
+    List<HomeNewsItem> items, {
+    bool keepPrepared = false,
+    bool Function()? current,
+    void Function(int, HomeNewsItem)? onReady,
+    Map<(String, String), String> savedCoverVersions = const {},
+  }) async {
     final out = List<HomeNewsItem>.of(items);
     var next = 0;
     Future<void> worker() async {
-      while (next < items.length) {
+      while (next < items.length && current?.call() != false) {
         final index = next++;
         final item = items[index];
         final key = item.imageCacheKey;
-        out[index] = item.copyWith(clearImageBytes: true);
+        if (keepPrepared && key != null && _preparedCover(item, key)) {
+          onReady?.call(index, item);
+          continue;
+        }
+        if (key == null || !keepPrepared ||
+            !_preparedCover(item, key, allowPreviousVersion: true)) {
+          out[index] = item.copyWith(clearImageBytes: true);
+        }
         if (key == null) continue;
         try {
           final preloaded = item.imageBytes;
-          final result = await _publicImages.read(key,
-              legacyFallback: preloaded == null ? null : () async => preloaded);
-          out[index] = result.state == NewsImageReadState.hit
-              ? item.copyWith(imageBytes: result.bytes)
-              : item.copyWith(clearImageBytes: true);
+          final version = _publicImages.displayVersion(key);
+          var storedKey = key;
+          var result = await _publicImages.read(key,
+              legacyFallback: preloaded == null || keepPrepared
+                  ? null : () async => preloaded);
+          final savedVersion = savedCoverVersions[(item.id, key.path)];
+          if (result.state == NewsImageReadState.miss && savedVersion != null &&
+              savedVersion != key.version && current?.call() != false &&
+              version == _publicImages.displayVersion(key)) {
+            storedKey = NewsImageCacheKey(path: key.path, version: savedVersion);
+            result = await _publicImages.read(storedKey);
+          }
+          if (result.state != NewsImageReadState.hit ||
+              version != _publicImages.displayVersion(key) ||
+              current?.call() == false) continue;
+          final bytes = listEquals(out[index].imageBytes, result.bytes)
+              ? out[index].imageBytes! : result.bytes!;
+          if (keepPrepared) _preparedCovers[item.id] = (storedKey, version, bytes);
+          out[index] = item.copyWith(imageBytes: bytes);
+          onReady?.call(index, out[index]);
         } catch (_) {
           // One damaged cache entry must not hide the remaining news.
         }
@@ -500,21 +612,30 @@ class HomeDashboardService {
 
   Future<List<HomeNewsItem>> _resolveNewsImages(
     List<HomeNewsItem> items, {
+    required bool Function() current,
     void Function(List<HomeNewsItem>)? onImage,
   }) async {
     final resolved = List<HomeNewsItem>.from(items);
     var next = 0;
     Future<void> worker() async {
-      while (next < resolved.length) {
+      while (next < resolved.length && current()) {
         final index = next++;
         final item = resolved[index];
         final key = item.imageCacheKey;
-        if (key == null || item.imageBytes != null) continue;
+        if (key == null || _preparedCover(item, key)) continue;
         try {
+          final version = _publicImages.displayVersion(key);
           final bytes = await _fetchNewsImage(key);
-          if (bytes == null || bytes.isEmpty) continue;
-          resolved[index] = item.copyWith(imageBytes: bytes);
-          onImage?.call(List<HomeNewsItem>.unmodifiable(resolved));
+          if (!current() || bytes == null || bytes.isEmpty ||
+              version != _publicImages.displayVersion(key)) continue;
+          final previous = item.imageBytes;
+          if (previous != null && listEquals(previous, bytes)) {
+            _preparedCovers[item.id] = (key, version, previous);
+          } else {
+            _preparedCovers[item.id] = (key, version, bytes);
+            resolved[index] = item.copyWith(imageBytes: bytes);
+            onImage?.call(List<HomeNewsItem>.unmodifiable(resolved));
+          }
           // Versioned entries expire through the bounded cache eviction.
           // A late old refresh must never prune a newer cover version.
         } catch (error) {
@@ -676,23 +797,6 @@ class HomeDashboardService {
     }
     return (first['id']?.toString() ?? '')
         .compareTo(second['id']?.toString() ?? '');
-  }
-
-  static List<Map<String, dynamic>> _asMapList(dynamic data) {
-    if (data is List) {
-      return data
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
-    }
-    if (data is String && data.isNotEmpty) {
-      try {
-        return _asMapList(jsonDecode(data));
-      } catch (_) {
-        return const [];
-      }
-    }
-    return const [];
   }
 
   Future<void> setAssignmentDone({
@@ -981,8 +1085,8 @@ class HomeLoadCancelled extends StateError {
 
 /// Persists the published news feed for cache-first / stale-while-revalidate.
 ///
-/// Only the JSON returned by `get_my_published_news` is stored (never image
-/// bytes). Cache is never cleared on network error.
+/// Stores owner-scoped published metadata and an optional local cover version.
+/// The encoded images remain in the versioned public news image cache.
 class PublishedNewsCache {
   PublishedNewsCache({
     Future<SharedPreferences> Function()? prefs,
@@ -994,6 +1098,7 @@ class PublishedNewsCache {
   final String? Function()? _currentUserId;
 
   static const String keyPrefix = 'home_published_news_v1';
+  static const _savedCoverVersionField = '_saved_cover_version';
 
   String _keyFor(String? userId) {
     final id = (userId ?? '').trim();
@@ -1002,7 +1107,8 @@ class PublishedNewsCache {
   }
 
   Future<List<HomeNewsItem>> read(
-      {String? owner, bool Function()? isCurrent}) async {
+      {String? owner, bool Function()? isCurrent,
+      void Function((String, String), String)? onSavedCoverVersion}) async {
     try {
       final userId = owner ?? _currentUserId?.call();
       final prefs = await _prefs();
@@ -1014,7 +1120,15 @@ class PublishedNewsCache {
       if (decoded is List) {
         return decoded
             .whereType<Map>()
-            .map((e) => mapPublishedNews(Map<String, dynamic>.from(e)))
+            .map((e) {
+              final item = mapPublishedNews(Map<String, dynamic>.from(e));
+              final version = e[_savedCoverVersionField];
+              final path = item.imageCacheKey?.path;
+              if (item.usesImage && version is String && path != null) {
+                onSavedCoverVersion?.call((item.id, path), version);
+              }
+              return item;
+            })
             .toList();
       }
     } catch (e) {
@@ -1024,13 +1138,24 @@ class PublishedNewsCache {
   }
 
   Future<void> write(List<Map<String, dynamic>> rows,
-      {String? owner, bool Function()? isCurrent}) async {
+      {String? owner, bool Function()? isCurrent,
+      Map<(String, String), String> savedCoverVersions = const {}}) async {
     try {
       final userId = owner ?? _currentUserId?.call();
       final prefs = await _prefs();
       if ((_currentUserId != null && _currentUserId() != userId) ||
           !(isCurrent?.call() ?? true)) return;
-      await prefs.setString(_keyFor(userId), jsonEncode(rows));
+      final toSave = [
+        for (final row in rows)
+          {
+            for (final entry in row.entries)
+              if (entry.key != _savedCoverVersionField) entry.key: entry.value,
+            if (savedCoverVersions[(row['id']?.toString() ?? '',
+                row['image_path']?.toString().trim() ?? '')] case final version?)
+              _savedCoverVersionField: version,
+          },
+      ];
+      await prefs.setString(_keyFor(userId), jsonEncode(toSave));
     } catch (e) {
       debugPrint('[home] news cache write failed: $e');
     }

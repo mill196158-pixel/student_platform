@@ -245,6 +245,114 @@ void main() {
     expect(visible, ['c0', 'c1']);
   });
 
+  testWidgets('profile carousel saves space and keeps the image and gestures',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final tapped = <String>[];
+    final visible = <String>[];
+    final cards = [
+      ManagedProfileFeedCard(
+        id: 'image',
+        origin: ContentOrigin.admin,
+        sortOrder: 0,
+        priority: 0,
+        payload: ProfileFeedPayload.demoFeed.first.copyWith(
+          cardVariant: 'image_top_text',
+        ),
+        imageBytes: _pngBytes,
+      ),
+      ManagedProfileFeedCard(
+        id: 'text',
+        origin: ContentOrigin.admin,
+        sortOrder: 1,
+        priority: 0,
+        payload: ProfileFeedPayload.demoFeed[1],
+      ),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ProductTheme.build(),
+        home: Scaffold(
+          body: StudentProfileFeedCarousel(
+            cards: cards,
+            onTap: (card) => tapped.add(card.id),
+            onVisibleCard: (card) => visible.add(card.id),
+          ),
+        ),
+      ),
+    );
+
+    final page = find.byType(PageView);
+    expect(tester.getSize(page).height, 184);
+    expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.cover);
+    expect(tester.getSize(find.byType(Image)).height, 80);
+    await tester.tap(find.text('О нас'));
+    await tester.drag(page, const Offset(-240, 0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Расписание занятий'));
+    expect(tapped, ['image', 'text']);
+    expect(visible, ['image', 'text']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact promo variants fit at 320 px with large text',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const action = 'Открыть подробные материалы';
+    for (final variant in [
+      'gradient_text',
+      'image_full',
+      'image_overlay',
+      'image_top_text',
+      'compact_icon',
+      'accent_info',
+      'no_image',
+    ]) {
+      await tester.pumpWidget(MaterialApp(
+        theme: ProductTheme.build(brightness: Brightness.dark),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(1.5)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: StudentProfileFeedCarousel(
+            cards: [
+              ManagedProfileFeedCard(
+                id: variant,
+                origin: ContentOrigin.demo,
+                sortOrder: 0,
+                priority: 0,
+                showDemoBadge: true,
+                payload: ProfileFeedPayload(
+                  title: 'Самостоятельная подготовка к экзаменам',
+                  subtitle: 'Дополнительные материалы и разбор типовых задач',
+                  ctaLabel: action,
+                  iconKey: 'school',
+                  cardVariant: variant,
+                ),
+                imageBytes: _pngBytes,
+              ),
+            ],
+            onTap: (_) {},
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(PageView)).height, 252);
+      expect(
+          find.text('Самостоятельная подготовка к экзаменам'), findsOneWidget);
+      if (variant != 'image_full') expect(find.text(action), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: variant);
+    }
+  });
+
   test('ProfileFeedPayload round-trips optional gradient colors', () {
     const payload = ProfileFeedPayload(
       title: 'T',

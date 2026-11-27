@@ -21,6 +21,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:student_ui/student_ui.dart';
 import 'auth_session_scope_test.dart' show fakeSession;
 
+const _coverPng =
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGPUmtvPgA0wYRUdtBIADzYBZqSxVuUAAAAASUVORK5CYII=';
+
 class _Reader implements CachedHomeScheduleReader {
   _Reader(this.caps);
   final SessionCapabilities caps;
@@ -154,10 +157,6 @@ class _RefreshDashboard extends _Dashboard {
   _RefreshDashboard(this.first);
   final HomeNewsItem first;
   Completer<void>? loadGate;
-  bool returnCached = false;
-  @override
-  Future<List<HomeNewsItem>> loadCachedNews() async =>
-      returnCached ? [first.copyWith(clearImageBytes: true)] : [];
   @override
   Future<HomeDashboardData> load({void Function(HomeDashboardData)? onUpdate,
       HomeDashboardData? previous}) async {
@@ -237,6 +236,17 @@ class _DisposeActionState extends State<_DisposeAction> {
   Widget build(BuildContext context) => const SizedBox();
 }
 
+Future<void> _waitForNewsFrame(WidgetTester tester, String title) async {
+  final article = find.text(title);
+  for (var frame = 0; article.evaluate().isEmpty && frame < 100; frame++) {
+    // Flutter's image codec finishes on the engine thread before Home paints.
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)));
+    await tester.pump();
+  }
+  expect(article, findsWidgets);
+}
+
 void main() {
   testWidgets('online late news keeps the summary fixed and returns to its slot on tab entry',
       (tester) async {
@@ -301,23 +311,21 @@ void main() {
   });
 
   testWidgets('refresh keeps validated current news frame and drops it on denial', (tester) async {
-    final bytes = Uint8List.fromList(base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII='));
+    final bytes = base64Decode(_coverPng);
     final item = HomeNewsItem(id: 'n', title: 'Refresh news', subtitle: '', body: '',
         icon: Icons.info, gradientColors: const [], type: HomeNewsType.update,
         createdAt: DateTime.utc(2026), imagePath: 'news/a.png', imageBytes: bytes);
     final dashboard = _RefreshDashboard(item);
     await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: dashboard,
         promoService: _Promo(), notificationsApi: _Notifications())));
-    await tester.pumpAndSettle();
+    await _waitForNewsFrame(tester, 'Refresh news');
     expect(tester.widget<StudentHomeView>(find.byType(StudentHomeView)).data.news.single.imageBytes, bytes);
-    dashboard.returnCached = true;
     dashboard.loadGate = Completer<void>();
     final before = dashboard.imageValidationCalls;
     final refreshing = tester.widget<StudentHomeView>(find.byType(StudentHomeView)).onRefresh!();
     await tester.pump();
     await tester.pump();
-    expect(dashboard.imageValidationCalls, greaterThan(before));
+    expect(dashboard.imageValidationCalls, before);
     expect(tester.widget<StudentHomeView>(find.byType(StudentHomeView)).data.news.single.imageBytes, bytes);
     dashboard.loadGate!.complete();
     await refreshing;
@@ -338,8 +346,7 @@ void main() {
     final caps = SessionCapabilities(scope);
     expect(caps.grant(SessionCapabilityMode.cacheOnly,
         caps.beginAuthorization(scope.capture()!)!), isTrue);
-    final bytes = Uint8List.fromList(base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII='));
+    final bytes = base64Decode(_coverPng);
     final content = _Content(HomeContentSnapshot([{
       'id': 'n', 'title': 'Story news', 'body': 'Story text',
       'created_at': '2026-11-06T00:00:00Z', 'variant': 'imageOverlay',
@@ -348,8 +355,7 @@ void main() {
     final dashboard = _Dashboard();
     await tester.pumpWidget(MaterialApp(home: HomeScreen(dashboardService: dashboard,
         cachedReader: _Reader(caps), homeContent: content, homeContentCapabilities: caps)));
-    await tester.pumpAndSettle();
-    expect(find.text('Story news'), findsWidgets);
+    await _waitForNewsFrame(tester, 'Story news');
     final before = dashboard.imageValidationCalls;
     dashboard.rejectImages = true;
     await tester.tap(find.text('Story news').first);
@@ -368,8 +374,7 @@ void main() {
     final caps = SessionCapabilities(scope);
     expect(caps.grant(SessionCapabilityMode.cacheOnly,
         caps.beginAuthorization(scope.capture()!)!), isTrue);
-    final bytes = Uint8List.fromList(base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII='));
+    final bytes = base64Decode(_coverPng);
     final content = _Content(HomeContentSnapshot([{
       'id': 'n', 'title': 'Snapshot news', 'body': 'Text',
       'created_at': '2026-11-06T00:00:00Z', 'variant': 'imageOverlay',
@@ -381,8 +386,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Snapshot news'), findsWidgets);
     expect(dashboard.imageValidationCalls, greaterThan(0));
-    expect(find.byWidgetPredicate((w) => w is Image && w.image is MemoryImage &&
-        identical((w.image as MemoryImage).bytes, bytes)), findsNothing);
+    expect(find.descendant(
+        of: find.byType(StudentHomeNewsCard), matching: find.byType(RawImage)),
+        findsNothing);
     await tester.pumpWidget(const SizedBox());
     caps.dispose(); scope.dispose(); await events.close();
   });
@@ -650,8 +656,7 @@ void main() {
         caps.grant(SessionCapabilityMode.cacheOnly,
             caps.beginAuthorization(scope.capture()!)!),
         true);
-    final bytes = Uint8List.fromList(base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/afoAAAAASUVORK5CYII='));
+    final bytes = base64Decode(_coverPng);
     final content = _Content(
         HomeContentSnapshot([
           {
@@ -698,11 +703,12 @@ void main() {
                     homeContent: content,
                     homeContentCapabilities: caps)
                 : const Text('closed'))));
+    await _waitForNewsFrame(tester, 'Локальная новость');
     await tester.pumpAndSettle();
     final initialBarriers = tester.widgetList(find.byType(ModalBarrier)).length;
-    expect(find.text('Локальная новость'), findsWidgets);
-    expect(find.byWidgetPredicate((w) => w is Image && w.image is MemoryImage),
-        findsWidgets);
+    final newsCover = find.descendant(
+        of: find.byType(StudentHomeNewsCard), matching: find.byType(RawImage));
+    expect(tester.widget<RawImage>(newsCover).image, isNotNull);
     await tester.tap(find.text('Локальная новость').first);
     await tester.pumpAndSettle();
     expect(find.text('Сохранённый текст новости'), findsWidgets);

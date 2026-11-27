@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
-import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
 import 'package:student_platform/src/core/offline_policy_grant.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
@@ -248,112 +247,27 @@ void main() {
     expect(calls, 0);
     ProjectChatServerCache.instanceChanges.removeListener(listener);
   });
-  Future<void> expandDetails(WidgetTester tester) async {
-    await tester.scrollUntilVisible(find.text('Дополнительно'), 260);
-    await tester.tap(find.text('Дополнительно'));
-    await tester.pumpAndSettle();
-  }
-
-  testWidgets('shown owner value disappears when cache instance changes',
+  testWidgets('settings never queries or displays scoped chat history',
       (tester) async {
+    var queries = 0;
+    cache.debugBeforeLogicalHistoryQuery = () async {
+      queries++;
+    };
+    final bytes = utf8.encode(expectedPayload).length;
     final snapshot = InventorySnapshot(
-        startedAt: DateTime.now(),
-        finishedAt: DateTime.now(),
-        observations: []);
+      startedAt: DateTime.now(),
+      finishedAt: DateTime.now(),
+      observations: [],
+      logicalHistoryBytes: bytes,
+    );
     await tester.pumpWidget(MaterialApp(
         home: CacheDiagnosticsScreen(
-            measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot,
-            debugCapabilities: caps)));
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    });
+      measure: () async => snapshot,
+    )));
     await tester.pump();
-    await expandDetails(tester);
-    expect(
-        find.text(
-            'Логический размер подтверждённой части истории: ${utf8.encode(expectedPayload).length} Б'),
-        findsOneWidget);
-    ProjectChatServerCache.qaInstance = ProjectChatServerCache(
-        db: db,
-        scope: scope,
-        currentBinding: () => binding,
-        project: 'https://a.invalid');
-    await tester.pump();
-    expect(
-        find.text('Логический размер подтверждённой части истории: неизвестно'),
-        findsOneWidget);
-    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
-  });
-  testWidgets('timed out read never publishes its late result', (tester) async {
-    final gate = Completer<void>();
-    cache.debugBeforeLogicalHistoryQuery = () => gate.future;
-    final snapshot = InventorySnapshot(
-        startedAt: DateTime.now(),
-        finishedAt: DateTime.now(),
-        observations: []);
-    await tester.pumpWidget(MaterialApp(
-        home: CacheDiagnosticsScreen(
-            measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot,
-            debugCapabilities: caps,
-            timeout: const Duration(milliseconds: 50))));
-    await tester.pump(const Duration(milliseconds: 100));
-    gate.complete();
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    });
-    await tester.pump();
-    await expandDetails(tester);
-    expect(
-        find.text('Логический размер подтверждённой части истории: неизвестно'),
-        findsOneWidget);
-    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
-  });
-  testWidgets('capability block hides an already shown value', (tester) async {
-    final snapshot = InventorySnapshot(
-        startedAt: DateTime.now(),
-        finishedAt: DateTime.now(),
-        observations: []);
-    await tester.pumpWidget(MaterialApp(
-        home: CacheDiagnosticsScreen(
-            measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot,
-            debugCapabilities: caps)));
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    });
-    await tester.pump();
-    await expandDetails(tester);
-    expect(
-        find.text(
-            'Логический размер подтверждённой части истории: ${utf8.encode(expectedPayload).length} Б'),
-        findsOneWidget);
-    caps.block();
-    await tester.pump();
-    expect(
-        find.text('Логический размер подтверждённой части истории: неизвестно'),
-        findsOneWidget);
-    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
-  });
-  testWidgets('late result after dispose is ignored', (tester) async {
-    final gate = Completer<void>();
-    cache.debugBeforeLogicalHistoryQuery = () => gate.future;
-    final snapshot = InventorySnapshot(
-        startedAt: DateTime.now(),
-        finishedAt: DateTime.now(),
-        observations: []);
-    await tester.pumpWidget(MaterialApp(
-        home: CacheDiagnosticsScreen(
-            measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot,
-            debugCapabilities: caps)));
-    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
-    gate.complete();
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    });
-    await tester.pump();
-    expect(tester.takeException(), isNull);
+    expect(queries, 0);
+    expect(find.text('$bytes Б'), findsNothing);
+    expect(find.text('Дополнительно'), findsNothing);
+    expect(find.text('Очистить кэш'), findsOneWidget);
   });
 }

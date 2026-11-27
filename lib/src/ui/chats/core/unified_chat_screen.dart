@@ -2444,6 +2444,8 @@ class _UnifiedChatScreenState extends State<UnifiedChatScreen> {
                     )
                   : Text(titleText),
               centerTitle: false,
+              titleSpacing: isDm ? 6 : null,
+              toolbarHeight: isDm ? 60 : null,
               iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
               actions: [
                 Padding(
@@ -3445,36 +3447,42 @@ class _DmTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final avatar = avatarUrl ?? '';
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircleAvatar(
-            radius: 17,
-            backgroundColor: colors.primaryContainer,
-            backgroundImage: (avatarUrl != null && avatarUrl!.isNotEmpty)
-                ? CachedNetworkImageProvider(avatarUrl!) as ImageProvider
-                : null,
-            child: (avatarUrl == null || avatarUrl!.isEmpty)
-                ? Icon(Icons.person_outline_rounded, size: 20, color: colors.onPrimaryContainer)
-                : null,
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: colors.onSurface,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: colors.primaryContainer,
+              backgroundImage:
+                  avatar.isEmpty ? null : CachedNetworkImageProvider(avatar),
+              child: avatar.isEmpty
+                  ? Icon(Icons.person_outline_rounded,
+                      size: 22, color: colors.onPrimaryContainer)
+                  : null,
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: colors.onSurface,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

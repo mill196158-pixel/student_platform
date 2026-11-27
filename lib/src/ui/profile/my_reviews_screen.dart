@@ -66,85 +66,130 @@ class _MyReviewsScreenState extends State<MyReviewsScreen> {
     final items = _result.items;
     final showDemoFallback =
         _result.isDemoFallback && _result.rpcUnavailable && items.isEmpty;
+    final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Мои отзывы')),
+      appBar: AppBar(title: const Text('Мои отзывы'), centerTitle: true),
       body: _loading
           ? const Center(child: ProductLoadingIndicator.page())
-          : _loadFailed
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('Не удалось загрузить отзывы'),
-                      TextButton(
-                          onPressed: _load, child: const Text('Повторить')),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Text(
-                        'Отзывы о преподавателях и предметах',
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                ),
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+                children: [
+                  if (_loadFailed)
+                    _ReviewsMessage(
+                      icon: Icons.refresh_rounded,
+                      title: 'Не удалось загрузить отзывы',
+                      action: FilledButton.tonal(
+                        onPressed: _load,
+                        child: const Text('Повторить'),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Отзывы проходят проверку перед публикацией.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFF6B7280),
-                            ),
+                    )
+                  else ...[
+                    Text(
+                      'Отзывы проходят проверку перед публикацией.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                      const SizedBox(height: 16),
-                      if (items.isEmpty && !showDemoFallback)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 24),
-                          child: Center(
-                            child: Text('Вы ещё не оставляли отзывов'),
+                    ),
+                    const SizedBox(height: 16),
+                    if (items.isEmpty && !showDemoFallback)
+                      const _ReviewsMessage(
+                        icon: Icons.rate_review_outlined,
+                        title: 'Вы ещё не оставляли отзывов',
+                        detail:
+                            'Здесь появятся ваши отзывы о преподавателях и предметах.',
+                      ),
+                    for (final item in items)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: StudentReviewCard(
+                          payload: item.toCardPayload(),
+                          inProfileList: true,
+                          onTap: () => _openReview(item),
+                        ),
+                      ),
+                    if (showDemoFallback) ...[
+                      StudentReviewCard(
+                        payload: StudentReviewCardPayload.demoPending,
+                        inProfileList: true,
+                        showDemoBadge: true,
+                        onTap: () => _openReview(
+                          MyEntityReviewItem(
+                            reviewId: 'demo-subject',
+                            entityType: ReviewEntityType.subject,
+                            entityId: _demoEntityId,
+                            entityLabel: StudentReviewCardPayload
+                                .demoPending.entityLabel,
+                            tagScores:
+                                StudentReviewCardPayload.demoPending.tagScores,
+                            bodyPreview: StudentReviewCardPayload
+                                .demoPending.bodyPreview,
+                            moderationStatus: ReviewModerationStatus.pending,
                           ),
                         ),
-                      for (final item in items)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: StudentReviewCard(
-                            payload: item.toCardPayload(),
-                            onTap: () => _openReview(item),
-                          ),
-                        ),
-                      if (showDemoFallback) ...[
-                        StudentReviewCard(
-                          payload: StudentReviewCardPayload.demoPending,
-                          showDemoBadge: true,
-                          onTap: () => _openReview(
-                            MyEntityReviewItem(
-                              reviewId: 'demo-subject',
-                              entityType: ReviewEntityType.subject,
-                              entityId: _demoEntityId,
-                              entityLabel: StudentReviewCardPayload
-                                  .demoPending.entityLabel,
-                              tagScores: StudentReviewCardPayload
-                                  .demoPending.tagScores,
-                              bodyPreview: StudentReviewCardPayload
-                                  .demoPending.bodyPreview,
-                              moderationStatus: ReviewModerationStatus.pending,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        StudentReviewCard(
-                          payload: StudentReviewCardPayload.demoTeacher,
-                          showDemoBadge: true,
-                        ),
-                      ],
+                      ),
+                      const SizedBox(height: 10),
+                      const StudentReviewCard(
+                        payload: StudentReviewCardPayload.demoTeacher,
+                        inProfileList: true,
+                        showDemoBadge: true,
+                      ),
                     ],
-                  ),
-                ),
+                  ],
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+class _ReviewsMessage extends StatelessWidget {
+  const _ReviewsMessage({
+    required this.icon,
+    required this.title,
+    this.detail,
+    this.action,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? detail;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 40, 8, 24),
+      child: Column(
+        children: [
+          Icon(icon, color: theme.colorScheme.primary, size: 28),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          if (detail != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              detail!,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (action != null) ...[
+            const SizedBox(height: 16),
+            action!,
+          ],
+        ],
+      ),
     );
   }
 }

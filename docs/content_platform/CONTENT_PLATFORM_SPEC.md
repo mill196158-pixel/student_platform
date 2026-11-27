@@ -883,13 +883,22 @@ schedule, assignments, and news have finished reading their snapshots. In an
 online session the Home cache reads also complete independently, and a late
 cache section cannot replace a newer live section.
 
-The signed-in Home uses the currently available news and promo placements when
-the visit starts. Media becoming ready in an existing section keeps that
-section in place. A section that first becomes available mid-visit appears
-after the visible dashboard sections so it does not push the schedule or
-assignments down. Returning to Home or pulling to refresh adopts the configured
-placement of all available sections. Each section still follows the existing
-publication and session checks.
+The signed-in Home checks the account's saved news before its initial dashboard
+frame. Local seed and decode each have a time limit. The first four cached
+covers are prepared with the rendered cards' image cache keys.
+The first Home frame can use prepared local covers while the live request is
+still pending. An unanswered feed uses a fixed-height section. If no news can
+be shown, its status changes in place and the section is absent on the next
+visit. The mounted tab and ready covers are reused on return. On refresh, the
+same publication and image path can retain a proven cover while verifying a
+new revision. Server denial, permission change and manual cache clearing release
+the corresponding cached snapshot. The guest feed keeps its existing placement
+behavior. Each section still follows its publication and session checks.
+
+Profile settings show the size of the replaceable image cache when measured
+and offer one clear action. This action preserves conversations, drafts,
+profile data and downloaded or explicitly saved offline files. Inventory
+refresh on resume and the internal image cache budget continue to run.
 
 Team message text can contain a `studentplatform://chat/<uuid>` link to a
 main chat. The in-app tap uses `content_resolve_chat_cta` for the exact chat ID

@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-/// Full-bleed news image surface with skeleton + soft crossfade.
+/// Full-bleed news image surface with a fixed-geometry fallback.
 ///
 /// Always expands to the parent bounds. Image uses [BoxFit.cover] so the media
 /// plane is edge-to-edge with no letterboxing and no stretched proportions.
@@ -10,6 +10,7 @@ class NewsImageFrame extends StatelessWidget {
   const NewsImageFrame({
     required this.bytes,
     required this.colors,
+    this.imageProvider,
     this.alignment = Alignment.center,
     this.borderRadius,
     this.isLoading = false,
@@ -19,6 +20,7 @@ class NewsImageFrame extends StatelessWidget {
   });
 
   final Uint8List? bytes;
+  final ImageProvider<Object>? imageProvider;
   final List<Color> colors;
   final Alignment alignment;
   final BorderRadius? borderRadius;
@@ -26,13 +28,13 @@ class NewsImageFrame extends StatelessWidget {
   final bool hasError;
   final BoxFit fit;
 
-  bool get _hasBytes => bytes != null && bytes!.isNotEmpty;
-
   @override
   Widget build(BuildContext context) {
     final radius = borderRadius ?? BorderRadius.zero;
     final base = colors.isNotEmpty ? colors.first : const Color(0xFFE9EAF1);
     final end = colors.length > 1 ? colors.last : const Color(0xFFD7D9E4);
+    final provider =
+        imageProvider ?? (bytes?.isNotEmpty == true ? MemoryImage(bytes!) : null);
 
     return ClipRRect(
       borderRadius: radius,
@@ -54,7 +56,7 @@ class NewsImageFrame extends StatelessWidget {
               ),
             ),
           ),
-          if (hasError && !_hasBytes)
+          if (hasError && provider == null)
             const Positioned.fill(
               child: ColoredBox(
                 color: Color(0x14000000),
@@ -66,36 +68,17 @@ class NewsImageFrame extends StatelessWidget {
                 ),
               ),
             ),
-          // Full-bleed photo — must fill the stack or the underlay shows as stripes.
-          Positioned.fill(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeIn,
-              layoutBuilder: (currentChild, previousChildren) {
-                return Stack(
-                  fit: StackFit.expand,
-                  children: <Widget>[
-                    ...previousChildren,
-                    if (currentChild != null) currentChild,
-                  ],
-                );
-              },
-              child: _hasBytes
-                  ? SizedBox.expand(
-                      key: ValueKey<int>(bytes!.length),
-                      child: Image.memory(
-                        bytes!,
-                        fit: fit,
-                        alignment: alignment,
-                        gaplessPlayback: true,
-                        filterQuality: FilterQuality.medium,
-                        errorBuilder: (_, __, ___) => const SizedBox.expand(),
-                      ),
-                    )
-                  : const SizedBox.expand(key: ValueKey('empty')),
+          // A warmed provider provides its first frame synchronously.
+          if (provider != null)
+            Positioned.fill(
+              child: Image(
+                image: provider,
+                fit: fit,
+                alignment: alignment,
+                filterQuality: FilterQuality.medium,
+                errorBuilder: (_, __, ___) => const SizedBox.expand(),
+              ),
             ),
-          ),
         ],
       ),
     );

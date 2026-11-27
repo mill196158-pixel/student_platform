@@ -391,7 +391,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               _SettingsNavRow(
                 icon: Icons.storage_outlined,
                 title: 'Данные приложения',
-                subtitle: 'Частичная оценка хранилища',
+                subtitle: 'Освободить место',
                 onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
                   builder: (_) => const CacheDiagnosticsScreen(),
                 )),

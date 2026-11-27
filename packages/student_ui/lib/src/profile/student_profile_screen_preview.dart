@@ -76,6 +76,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
 
   /// Uniform vertical gap between major profile blocks.
   static const double sectionGap = 14;
+  static const double _feedGap = 10;
 
   @override
   Widget build(BuildContext context) {
@@ -86,6 +87,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
       );
     }
 
+    final showFeed = !feedLoadError && feedCards.isNotEmpty;
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: SingleChildScrollView(
@@ -132,8 +134,8 @@ class StudentProfileScreenPreview extends StatelessWidget {
                         ),
                 ),
               ),
-            ] else if (feedCards.isNotEmpty) ...[
-              const SizedBox(height: sectionGap),
+            ] else if (showFeed) ...[
+              const SizedBox(height: _feedGap),
               StudentProfileFeedCarousel(
                 cards: feedCards,
                 selectedId: selectedFeedId,
@@ -142,7 +144,7 @@ class StudentProfileScreenPreview extends StatelessWidget {
               ),
             ],
             if (showStudySection) ...[
-              const SizedBox(height: sectionGap),
+              SizedBox(height: showFeed ? _feedGap : sectionGap),
               const _SectionTitle('Учёба'),
               const SizedBox(height: sectionGap),
               if (showDiary)
@@ -164,7 +166,8 @@ class StudentProfileScreenPreview extends StatelessWidget {
                 compact: true,
               ),
             ],
-            const SizedBox(height: sectionGap),
+            SizedBox(
+                height: showFeed && !showStudySection ? _feedGap : sectionGap),
             OutlinedButton.icon(
               onPressed: onReviewsTap,
               icon: const Icon(Icons.rate_review_outlined),

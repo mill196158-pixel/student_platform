@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:student_platform/src/core/attachment_storage_inventory.dart';
 import 'package:student_platform/src/core/cache_inventory_snapshot.dart';
 import 'package:student_platform/src/core/optional_image_cache_budget.dart';
 import 'package:student_platform/src/ui/profile/cache_diagnostics_screen.dart';
@@ -114,7 +113,8 @@ void main() {
     expect(budget.observedBytes, isNull);
     expect(budget.reserve(1), isNull);
   });
-  testWidgets('settings displays the same real budget measurement',
+  testWidgets(
+      'settings shows only replaceable copies while internal budget keeps its total',
       (tester) async {
     late InventorySnapshot snapshot;
     late OptionalImageCacheBudget budget;
@@ -126,15 +126,12 @@ void main() {
       snapshot = await c.collect();
     });
     await tester.pumpWidget(MaterialApp(
-        home: CacheDiagnosticsScreen(
-            measureAttachments: () async => const AttachmentStorageReport(),
-            measure: () async => snapshot, budget: budget)));
+        home: CacheDiagnosticsScreen(measure: () async => snapshot)));
     await tester.pump();
-    expect(find.text('Учтённые копии новостей и материалов'), findsOneWidget);
-    expect(find.text('14 Б'), findsOneWidget);
+    expect(find.text('3 Б'), findsOneWidget);
+    expect(find.text('14 Б'), findsNothing);
     expect(budget.observedBytes, 14);
-    expect(find.textContaining('часть подтверждённой истории чатов'),
-        findsOneWidget);
+    expect(find.text('Дополнительно'), findsNothing);
   });
 }
 
