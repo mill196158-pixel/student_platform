@@ -130,8 +130,8 @@ void main() {
             measureAttachments: () async => const AttachmentStorageReport(),
             measure: () async => snapshot, budget: budget)));
     await tester.pump();
-    expect(find.text('Учтённые копии новостей и материалов: 14 Б'),
-        findsOneWidget);
+    expect(find.text('Учтённые копии новостей и материалов'), findsOneWidget);
+    expect(find.text('14 Б'), findsOneWidget);
     expect(budget.observedBytes, 14);
     expect(find.textContaining('часть подтверждённой истории чатов'),
         findsOneWidget);

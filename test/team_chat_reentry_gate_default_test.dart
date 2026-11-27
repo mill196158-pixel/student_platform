@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -53,8 +54,18 @@ void main() {
     await tester.runAsync(() => Supabase.initialize(
       url: SupabaseConfig.url, publishableKey: 'test',
       authOptions: const FlutterAuthClientOptions(autoRefreshToken: false),
-      httpClient: MockClient((request) async => http.Response('[]', 200,
-        request: request, headers: {'content-type': 'application/json'})),
+      httpClient: MockClient((request) async {
+        final Object data = switch (request.url.path) {
+          '/rest/v1/chats' => {'id': 'chat'},
+          '/rest/v1/team_members' => [{'team_id': 'team', 'user_id': 'user'}],
+          '/rest/v1/rpc/get_my_chat_summaries' => [
+              {'chat_id': 'chat', 'team_id': 'team', 'chat_type': 'team_main'},
+            ],
+          _ => const [],
+        };
+        return http.Response(jsonEncode(data), 200,
+          request: request, headers: {'content-type': 'application/json'});
+      }),
     ));
     await tester.runAsync(() => signInForScopedDraft(Supabase.instance.client));
     addTearDown(() async {
@@ -102,6 +113,8 @@ void main() {
     await tester.pumpWidget(app(readyCubit));
     expect(tester.widget<Opacity>(listOpacity()).opacity, 0);
     for (var i = 0; i < 20 && find.byType(TextField).evaluate().isEmpty; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)));
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(find.byType(TextField), findsWidgets,
