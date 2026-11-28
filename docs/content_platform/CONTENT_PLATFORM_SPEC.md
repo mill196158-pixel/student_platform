@@ -911,12 +911,15 @@ publication's presentation and cover together. The temporary image index
 continues to enforce suppression, including after a file has been evicted.
 The reader reuses the verified copy under the same checks.
 
-The July welcome publication uses a fixed carousel slot while its authorized
-cover is being fetched or decoded. The card and tap target become available
-with the actual image frame. The story reader includes that page only after
-preparing its authorized cover for the reader viewport. This leaves the lower
-Home sections available while media loads and preserves the ordinary fallback
-for other publications.
+The July welcome publication can use the shipped copy of its public cover
+after the current feed or authorized offline snapshot confirms the exact
+publication, Storage path and revision. A fresh installation uses the local
+cover as soon as it receives the publication metadata. No article is created
+from the asset alone. Home still loads without waiting for the news request.
+The welcome card and tap target appear with the decoded frame, and a tap can
+reuse that frame in the reader. Other publications keep their existing fallback.
+Clearing downloaded copies leaves the packaged JPEG in place. It can only be
+shown again when the welcome publication is still eligible to appear.
 
 Profile settings show the size of the replaceable image cache when measured
 and offer one clear action. This action preserves conversations, drafts,

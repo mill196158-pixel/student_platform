@@ -207,13 +207,14 @@ void main() {
   }
   sqfliteFfiInit();
 
-  for (final (mode, offline, evicted, oldMetadata, withoutCopies) in [
-    ('slow-network', false, false, false, false),
-    ('offline', true, false, false, false),
-    ('evicted-temp-file', false, true, false, false),
-    ('older-metadata', false, false, true, false),
-    ('without-photo-copies', false, false, false, true),
-    ('offline-without-photo-copies', true, false, false, true),
+  for (final (mode, offline, evicted, oldMetadata, withoutCopies, withoutMetadata) in [
+    ('slow-network', false, false, false, false, false),
+    ('offline', true, false, false, false, false),
+    ('evicted-temp-file', false, true, false, false, false),
+    ('older-metadata', false, false, true, false, false),
+    ('without-photo-copies', false, false, false, true, false),
+    ('offline-without-photo-copies', true, false, false, true, false),
+    ('clean-install-with-fresh-metadata', false, false, false, true, true),
   ]) {
     testWidgets('July welcome first frames after upgrade, $mode',
         (tester) async {
@@ -227,14 +228,14 @@ void main() {
       PaintingBinding.instance.imageCache.clearLiveImages();
 
       SharedPreferences.setMockInitialValues({
-        '${PublishedNewsCache.keyPrefix}__$_owner': jsonEncode([
+        if (!withoutMetadata)
+          '${PublishedNewsCache.keyPrefix}__$_owner': jsonEncode([
           oldMetadata ? _oldArticle : _article,
           if (withoutCopies && !offline) _otherArticle,
         ]),
       });
       final transportGate = Completer<void>();
       final mediaGate = Completer<void>();
-      final waitingForMedia = Completer<void>();
       final authEvents = StreamController<AuthState>.broadcast(sync: true);
       final paths = <String>[];
       var serveWelcome = withoutCopies && !offline;
@@ -254,7 +255,6 @@ void main() {
         }
         if (serveWelcome && path == _fixtureDownload) {
           expect(request.method, 'GET');
-          if (!waitingForMedia.isCompleted) waitingForMedia.complete();
           await mediaGate.future;
           return http.Response.bytes(photo, 200,
               request: request, headers: {'content-type': 'image/jpeg'});
@@ -277,7 +277,6 @@ void main() {
       late OnlineSideEffectBarrier barrier;
       late HomeDashboardService dashboard;
       late HomeDashboardService Function() createDashboard;
-      late Future<bool> Function() persistedPhoto;
       await tester.runAsync(() async {
         final photoPath =
             Platform.environment['STUDENT_WELCOME_COVER_FIXTURE'] ??
@@ -393,15 +392,6 @@ void main() {
             evicted ? NewsImageReadState.unknown : NewsImageReadState.miss);
         coordinator = HomeContentCoordinator(
             store: store, scope: scope, httpClient: mock);
-        persistedPhoto = () async {
-          final durable = await coordinator.readOnline('news', barrier);
-          final optional = await publicImages.read(coverKey);
-          return durable?.images.values.any((bytes) =>
-                      sha256.convert(bytes).toString() == _coverHash) ==
-                  true &&
-              optional.state == NewsImageReadState.hit &&
-              sha256.convert(optional.bytes!).toString() == _coverHash;
-        };
         createDashboard = () => HomeDashboardService(
             client: client,
             sessionScope: scope,
@@ -486,44 +476,16 @@ void main() {
         final promoRaster =
             find.descendant(of: promo, matching: find.byType(RawImage));
         final summary = find.text('Сводка дня');
-        late final Rect loadingPromoBounds, loadingSummaryBounds;
         expect(tester.widget<RawImage>(promoRaster).image, isNotNull);
         await _capture(tester, boundary, '$mode-first-home');
-        if (withoutCopies) {
+        if (offline && withoutCopies) {
           expect(card, findsNothing,
-              reason:
-                  'Known July image card must not paint its purple fallback '
-                  'while both local photo copies are absent');
-          if (offline) {
-            expect(paths, isEmpty);
-            return;
-          }
-          expect(sibling.hitTestable(), findsOneWidget);
-          loadingPromoBounds = tester.getRect(promo);
-          loadingSummaryBounds = tester.getRect(summary);
-          await waitFor(() => waitingForMedia.isCompleted);
-          expect(waitingForMedia.isCompleted, isTrue);
-          expect(card, findsNothing);
-          expect(tester.getRect(promo), loadingPromoBounds);
-          expect(tester.getRect(summary), loadingSummaryBounds);
-          await tester.tap(sibling);
-          await firstFrame(sheet);
-          expect(
-              tester
-                  .widget<StudentNewsStorySheet>(sheet)
-                  .news
-                  .map((item) => item.title),
-              [_otherTitle],
-              reason: 'A pending welcome cover cannot be opened by swiping');
-          await closeStory();
-          expect(card, findsNothing);
-          expect(mediaGate.isCompleted, isFalse);
-          mediaGate.complete();
-          await firstFrame(card);
-          expect(tester.getRect(promo), loadingPromoBounds);
-          expect(tester.getRect(summary), loadingSummaryBounds);
-          await _capture(tester, boundary, '$mode-first-photo');
+              reason: 'Bundled artwork must not invent an authorized offline article');
+          expect(paths, isEmpty);
+          return;
         }
+        final loadingPromoBounds = tester.getRect(promo);
+        final loadingSummaryBounds = tester.getRect(summary);
         expect(card.hitTestable(), findsOneWidget);
         final homePhoto =
             await _photoOnRaster(tester, boundary, _decodedPhoto(tester, card));
@@ -568,22 +530,7 @@ void main() {
         expect([homePhoto, returnedPhoto, storyPhoto], [true, true, true],
             reason: 'Original July JPEG decoded on all three first frames');
         if (withoutCopies) {
-          var saved = false;
-          var checking = false;
-          for (var frame = 0; !saved && frame < 100; frame++) {
-            if (!checking) {
-              checking = true;
-              unawaited(persistedPhoto().then((available) {
-                saved = available;
-                checking = false;
-              }));
-            }
-            await tester.runAsync(
-                () => Future<void>.delayed(const Duration(milliseconds: 5)));
-            await tester.pump();
-          }
-          expect(saved, isTrue,
-              reason: 'The original download is persisted on both paths');
+          expect(mediaGate.isCompleted, isFalse);
           await closeStory();
           await tester.tap(sibling);
           await firstFrame(sheet);

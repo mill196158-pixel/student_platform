@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:student_ui/student_ui.dart';
@@ -34,6 +35,11 @@ import 'package:student_platform/src/ui/home/home_frame_trace.dart';
 import 'package:student_platform/src/ui/info/home_content_snapshot_store.dart';
 
 class HomeDashboardService {
+  static const _welcomeNewsId = '9658bbcf-7fc8-48cc-ae1f-21b1a0ad1523';
+  static const _welcomeCoverPath =
+      'news/11c2995c-a5c0-40d3-87e2-422fa479543a/02013116-6a91-4e5f-9b4e-bddc90a1ba32.jpg';
+  static const _welcomeCoverRevision = '2026-11-06T11:38:39.653775Z';
+
   HomeDashboardService({
     SupabaseClient? client,
     ScheduleRepository? scheduleRepository,
@@ -135,6 +141,7 @@ class HomeDashboardService {
   final HomeSnapshotCache? _snapshotCache;
   final HomeSnapshotCache? _projectSnapshotCache;
   final _preparedCovers = <String, (NewsImageCacheKey, (int, int), Uint8List)>{};
+  Future<Uint8List?>? _welcomeCover;
   (String?, int?)? _preparedCoverOwner;
   bool _disposed = false;
   int _loadRevision = 0;
@@ -491,10 +498,18 @@ class HomeDashboardService {
       }
     }
 
-    final refreshing = refresh();
-    final local = readLocalFirst
+    List<Map<String, dynamic>>? readyRows;
+    final refreshing = refresh().then((rows) => readyRows = rows);
+    final cached = readLocalFirst
         ? await _loadVisibleCachedNews(newsUser, current)
         : _retainCurrentCovers(previous);
+    final rowsBeforeFirstFrame = readyRows;
+    // A response that already completed can supply metadata to a fresh
+    // install. Home never waits for the feed or its image download here.
+    final local = cached.isEmpty && rowsBeforeFirstFrame != null
+        ? await _applyBundledWelcomeCover(
+            rowsBeforeFirstFrame.map(mapPublishedNews).toList(), current)
+        : cached;
     if (!current()) return;
     onLocalReady(local);
     final rows = await refreshing;
@@ -527,10 +542,11 @@ class HomeDashboardService {
         });
     if (!current()) return;
     final prior = {for (final item in local) item.id: item};
-    final merged = _retainCurrentCovers([
+    final merged = await _applyBundledWelcomeCover(_retainCurrentCovers([
       for (final item in fresh)
         item.copyWith(imageBytes: prior[item.id]?.imageBytes),
-    ]);
+    ]), current);
+    if (!current()) return;
     onMetadata(merged);
     // Media owns its own deadlines; a late successful cover can refine the
     // publication without replacing the rest of the dashboard.
@@ -601,6 +617,36 @@ class HomeDashboardService {
     }
   }
 
+  bool _matchesBundledWelcomeCover(HomeNewsItem item) =>
+      item.id == _welcomeNewsId &&
+      item.usesImage &&
+      item.imageCacheKey?.path == _welcomeCoverPath &&
+      item.updatedAt == DateTime.parse(_welcomeCoverRevision);
+
+  Future<Uint8List?> _loadBundledWelcomeCover() async {
+    try {
+      final data = await rootBundle.load('assets/images/welcome_news_cover.jpg');
+      return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<HomeNewsItem>> _applyBundledWelcomeCover(
+      List<HomeNewsItem> items, bool Function() current) async {
+    final index = items.indexWhere(_matchesBundledWelcomeCover);
+    if (index == -1 || !current()) return items;
+    final item = items[index];
+    final key = item.imageCacheKey!;
+    final version = _publicImages.displayVersion(key);
+    final bytes = await (_welcomeCover ??= _loadBundledWelcomeCover());
+    if (bytes == null || !current() || version != _publicImages.displayVersion(key)) {
+      return items;
+    }
+    _preparedCovers[item.id] = (key, version, bytes);
+    return [...items]..[index] = item.copyWith(imageBytes: bytes);
+  }
+
   List<HomeNewsItem> _retainCurrentCovers(List<HomeNewsItem> items) {
     return items.map((item) {
       final key = item.imageCacheKey;
@@ -643,11 +689,24 @@ class HomeDashboardService {
         }
         if (key == null) continue;
         try {
+          final version = _publicImages.displayVersion(key);
+          // The shipped photo is only selected for the exact published
+          // revision. Authorization and the article itself still come from
+          // the current feed or an authorized offline snapshot.
+          if (_matchesBundledWelcomeCover(item)) {
+            final bundled = await (_welcomeCover ??= _loadBundledWelcomeCover());
+            if (current?.call() == false || version != _publicImages.displayVersion(key)) continue;
+            if (bundled != null) {
+              if (keepPrepared) _preparedCovers[item.id] = (key, version, bundled);
+              out[index] = item.copyWith(imageBytes: bundled);
+              onReady?.call(index, out[index]);
+              continue;
+            }
+          }
           final saved = verifiedCovers[item.id];
           final preloaded = saved?.imageCacheKey?.path == key.path
               ? saved?.imageBytes
               : (keepPrepared ? null : item.imageBytes);
-          final version = _publicImages.displayVersion(key);
           var storedKey = key;
           var result = await _publicImages.read(key,
               legacyFallback: preloaded == null ? null : () async => preloaded);

@@ -1410,10 +1410,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     final trace = HomeFrameTrace();
     Future<StudentHomeNews?> prepareCover(
-        HomeNewsItem item, Future<Uint8List?> local) async {
-      final verified = await local;
-      if (!coverCurrent() || !articleCurrent(item)) return null;
+        HomeNewsItem item, Future<Uint8List?> Function() local) async {
       final selected = identical(item, initial);
+      final displayedBytes = item.imageBytes;
+      final displayedProvider = _newsCoverProviders[displayedBytes];
+      bool coverStillDisplayed() =>
+          coverCurrent() &&
+          _data?.news.any((current) =>
+                  current.id == item.id &&
+                  current.imageCacheKey?.path == item.imageCacheKey?.path &&
+                  identical(current.imageBytes, displayedBytes)) ==
+              true;
+
+      // The welcome card becomes tappable only after this exact cover is
+      // decoded. Reuse it rather than making the tap wait for another decode.
+      if (_requiresDecodedNewsCover(item) &&
+          displayedBytes != null &&
+          displayedProvider != null &&
+          coverStillDisplayed()) {
+        final cached = await displayedProvider.obtainCacheStatus(
+            configuration: createLocalImageConfiguration(context));
+        if (cached != null &&
+            !cached.pending &&
+            (cached.keepAlive || cached.live) &&
+            coverStillDisplayed()) {
+          if (selected) {
+            trace.mark('story_cover_read', counts: {'files': 0, 'reused': 1});
+            trace.mark('story_cover_decoded', counts: {'covers': 1, 'reused': 1});
+          }
+          return _presentationNews([item]).single;
+        }
+      }
+
+      final verified = await local();
+      if (!coverCurrent() || !articleCurrent(item)) return null;
       if (selected) {
         trace.mark('story_cover_read',
             counts: {'files': verified?.isNotEmpty == true ? 1 : 0});
@@ -1440,15 +1470,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Only consult local media before opening. Include the welcome page in
     // the swipe sequence only when its authorized cover is already decoded.
     _openingNewsStory = true;
-    late final Future<Uint8List?> initialLocal;
+    late final initialLocal = localCover(initial);
     StudentHomeNews? readyInitial;
     StudentHomeNews? readyWelcome;
     try {
-      initialLocal = localCover(initial);
-      final opening = prepareCover(initial, initialLocal);
+      final opening = prepareCover(initial, () => initialLocal);
       final extraWelcome = welcome != null && !identical(welcome, initial) &&
               welcome.imageBytes != null
-          ? prepareCover(welcome, localCover(welcome))
+          ? prepareCover(welcome, () => localCover(welcome))
           : null;
       readyInitial = await opening;
       readyWelcome = identical(welcome, initial) ? readyInitial : await extraWelcome;
