@@ -321,6 +321,7 @@ class _SoftHeader extends StatelessWidget {
     return Column(
       children: [
         CircleAvatar(
+          key: ValueKey(savedAvatar ?? avatarProvider),
           radius: 44,
           backgroundColor: StudentProfileScreenPreview._lavender,
           backgroundImage: avatarProvider,

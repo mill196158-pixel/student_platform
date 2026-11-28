@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:student_ui/student_ui.dart';
 import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
@@ -94,7 +95,7 @@ void main() {
     var calls = 0;
     await tester.runAsync(() => Supabase.initialize(
         url: 'https://example.invalid',
-        anonKey: 'test',
+        publishableKey: 'test',
         httpClient: MockClient((_) async {
           calls++;
           throw StateError('unexpected network');
@@ -102,7 +103,7 @@ void main() {
         authOptions: FlutterAuthClientOptions(
             autoRefreshToken: false, detectSessionInUri: false)));
     final avatarBytes = base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==');
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGPI0lkARAwQCgAhHgTZarlUbAAAAABJRU5ErkJggg==');
     final root = (await tester.runAsync(
         () => Directory.systemTemp.createTemp('profile-offline-avatar-')))!;
     const channel = MethodChannel('plugins.flutter.io/path_provider');
@@ -110,6 +111,9 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (_) async => root.path);
     final avatarCache = await tester.runAsync(() async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      await databaseFactory.setDatabasesPath(root.path);
       final cache = DefaultCacheManager();
       final provider =
           profileAvatarImage('a', _avatarUrl) as CachedNetworkImageProvider;
@@ -135,17 +139,18 @@ void main() {
             cachedReader: _Reader(caps),
             cachedChats: _Chats(),
             cachedCapabilities: caps)));
-    await tester.pump();
-    await tester.pump();
-    expect(find.text('Сохранённое имя'), findsOneWidget);
-    expect(find.text('СПбГАСУ, группа Группа'), findsOneWidget);
-    ImageProvider? avatar() =>
-        tester.widget<CircleAvatar>(find.byType(CircleAvatar)).foregroundImage;
-    for (var attempt = 0; avatar() == null && attempt < 25; attempt++) {
+    for (var attempt = 0;
+        find.byType(StudentProfileScreenPreview).evaluate().isEmpty &&
+            attempt < 25;
+        attempt++) {
       await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 10)));
       await tester.pump();
     }
+    expect(find.text('Сохранённое имя'), findsOneWidget);
+    expect(find.text('СПбГАСУ, группа Группа'), findsOneWidget);
+    ImageProvider? avatar() =>
+        tester.widget<CircleAvatar>(find.byType(CircleAvatar)).foregroundImage;
     expect(avatar(), isA<MemoryImage>());
     expect((avatar()! as MemoryImage).bytes, orderedEquals(avatarBytes));
     await tester.tap(find.text('Друзья'));
@@ -156,7 +161,7 @@ void main() {
     await tester.tap(find.text('Данные приложения'));
     await tester.pumpAndSettle();
     expect(find.byType(CacheDiagnosticsScreen), findsOneWidget);
-    await tester.pageBack();
+    await tester.tap(find.byTooltip('Назад'));
     await tester.pumpAndSettle();
     final view = tester.widget<StudentProfileScreenPreview>(
         find.byType(StudentProfileScreenPreview));

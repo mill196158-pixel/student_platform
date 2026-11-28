@@ -78,3 +78,19 @@ Future<Uint8List?> readSavedProfileAvatar(
   }
   return null;
 }
+
+/// The just-confirmed upload is already available to the app. Keep a bounded
+/// copy at the same owner/version key read by the profile prewarm.
+Future<void> saveUploadedProfileAvatar(String userId, String avatarUrl,
+    Uint8List bytes, {required bool Function() isCurrent}) async {
+  if (kIsWeb || bytes.isEmpty || bytes.length > _maxSavedAvatarBytes ||
+      !isCurrent()) return;
+  final provider = profileAvatarImage(userId, avatarUrl);
+  if (provider is! CachedNetworkImageProvider || provider.cacheKey == null) return;
+  try {
+    await DefaultCacheManager().putFile(provider.url, bytes,
+        key: provider.cacheKey, fileExtension: 'jpg');
+  } catch (_) {
+    // The upload is already confirmed. Disk cache remains best-effort.
+  }
+}

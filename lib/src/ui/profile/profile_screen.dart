@@ -12,9 +12,14 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:student_ui/student_ui.dart';
 
 import 'package:student_platform/src/core/auth_session.dart';
+import 'package:student_platform/src/core/auth_session_scope.dart';
+import 'package:student_platform/src/core/auth_session_scope_host.dart';
+import 'package:student_platform/src/core/legacy_user_cache.dart';
+import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/services/auth_service.dart';
 import 'package:student_platform/src/ui/chats/my_chats_screen.dart';
 import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
+import 'package:student_platform/src/ui/home/home_snapshot_cache.dart';
 import 'package:student_platform/src/ui/chats/core/project_chat_server_cache.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/friends/my_friends_screen.dart';
@@ -50,8 +55,13 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _cachedUnavailable = false;
   int _cachedProfileGeneration = 0;
   Uint8List? _cachedAvatar;
+  ImageProvider? _onlineAvatar;
   String? _onlineOwner;
   int _onlineProfileGeneration = 0;
+  int _headerRevision = 0;
+  AuthSessionScope? _profileScope;
+  int? _scopeGeneration;
+  Future<void>? _localHeader;
   StreamSubscription<AuthState>? _authChanges;
   bool _boundaryInvalidated = false;
   final _cachedBoundaryEnd = Completer<void>();
@@ -86,6 +96,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ----- visibility gate -----
   bool _wasVisible = false;
+  bool _editingProfile = false;
 
   // chat ids для суммирования unread
 
@@ -110,17 +121,17 @@ class _ProfileScreenState extends State<ProfileScreen>
     WidgetsBinding.instance.addObserver(this);
     // слушаем активность от родителя
     widget.activeListenable?.addListener(_onActiveChanged);
-    // стартуем после первого кадра, чтобы исключить странности при построении
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _cacheOnly || _boundaryInvalidated) return;
-      debugPrint('${_ts()} [Profile] initState -> postFrame boot()');
-      _boot(); // без автозапуска таймера
-      unawaited(_loadFeed());
+      unawaited(_warmLocalHeader());
+      _onActiveChanged();
     });
   }
 
   Future<void> _loadFeed() async {
-    if (_cacheOnly || _boundaryInvalidated) return;
+    final owner = _onlineOwner;
+    final ownerGeneration = _onlineProfileGeneration;
+    if (owner == null || !_isOnlineProfileCurrent(owner, ownerGeneration)) return;
     if (_feedLoadInFlight) return;
     final generation = ++_feedLoadGeneration;
     _feedLoadInFlight = true;
@@ -275,6 +286,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_cacheOnly || _boundaryInvalidated) return;
+    _profileScope = AuthSessionScopeHost.maybeOf(context);
+    _onOnlineOwnerChanged();
     final route = ModalRoute.of(context);
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
@@ -311,12 +324,14 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void didPushNext() {
     debugPrint('${_ts()} [Profile] didPushNext -> stop polling');
+    _wasVisible = false;
     _stopPolling();
   }
 
   @override
   void didPop() {
     debugPrint('${_ts()} [Profile] didPop -> stop polling');
+    _wasVisible = false;
     _stopPolling();
   }
 
@@ -325,112 +340,75 @@ class _ProfileScreenState extends State<ProfileScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_cacheOnly || _boundaryInvalidated) return;
     if (state == AppLifecycleState.resumed) {
-      final active = widget.activeListenable?.value ?? true;
-      if (active) {
-        debugPrint(
-            '${_ts()} [Profile] lifecycle resumed & visible -> start polling');
-        // ignore: discarded_futures
-        AuthSession.ensureFreshSession(_sb);
-        _startPolling();
-        // ignore: discarded_futures
-        _pollOnce();
-        unawaited(_loadFeed());
-      } else {
-        debugPrint(
-            '${_ts()} [Profile] lifecycle resumed but hidden -> keep stopped');
-      }
+      _onActiveChanged();
     } else if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       debugPrint(
           '${_ts()} [Profile] lifecycle -> paused/inactive (stop polling)');
+      _wasVisible = false;
       _stopPolling();
     }
   }
 
-  // ===== boot =====
-  Future<void> _boot() async {
-    if (_cacheOnly || _boundaryInvalidated) return;
-    debugPrint('${_ts()} [Profile] boot start');
-    // 1) локальный пользователь (для шапки/группы)
-    final generation = _onlineProfileGeneration;
-    await _loadLocal();
-    if (!mounted ||
-        _cacheOnly ||
-        _boundaryInvalidated ||
-        generation != _onlineProfileGeneration) return;
-    // 2) гарантируем валидную сессию
-    if (mounted) setState(() => _loading = false);
-    await _ensureSession();
-    if (!mounted ||
-        _cacheOnly ||
-        _boundaryInvalidated ||
-        generation != _onlineProfileGeneration) return;
-    if (_user == null) {
-      try {
-        await _refreshHeader();
-      } catch (error) {
-        debugPrint('[Profile] header unavailable: ${error.runtimeType}');
-      }
-    }
-    // 3) первый тик — только если вкладка активна. Не блокируем профиль
-    // подготовкой chat ids: unread_total считает серверный RPC.
-    if (mounted && (widget.activeListenable?.value ?? true)) {
-      await _pollOnce();
-    }
-    debugPrint('${_ts()} [Profile] boot done');
-  }
+  Future<void> _warmLocalHeader() => _localHeader ??= _loadLocal();
 
-  // === явное управление из родителя ===
+  bool get _isVisible =>
+      (widget.activeListenable?.value ?? true) &&
+      (ModalRoute.of(context)?.isCurrent ?? true);
+
   void _onActiveChanged() {
-    if (_cacheOnly || _boundaryInvalidated) return;
-    final active = widget.activeListenable?.value ?? true;
-    if (active) {
-      debugPrint('${_ts()} [Profile] active=true -> start polling');
-      _startPolling();
-      // ignore: discarded_futures
-      _pollOnce();
-      unawaited(_loadFeed());
-    } else {
-      debugPrint('${_ts()} [Profile] active=false -> stop polling');
+    if (!mounted || _cacheOnly || _boundaryInvalidated || _editingProfile) return;
+    final active = _isVisible;
+    if (active == _wasVisible) return;
+    _wasVisible = active;
+    if (!active) {
       _stopPolling();
+      return;
     }
+    _startPolling();
+    unawaited(_refreshVisibleProfile());
   }
 
-  // ===== visibility helpers =====
-  bool _isActuallyVisible() {
-    // Если есть PageRoute — проверяем, что текущий
-    final route = ModalRoute.of(context);
-    if (route is PageRoute) {
-      if (!route.isCurrent) return false;
-    }
-    // Если экран в Offstage(true) — он спрятан (типично для IndexedStack)
-    final offstage = context.findAncestorWidgetOfExactType<Offstage>();
-    if (offstage != null && offstage.offstage) return false;
-    // Рендер привязан и имеет размер
-    final ro = context.findRenderObject();
-    if (ro is RenderBox) {
-      return ro.attached && ro.hasSize && ro.size.longestSide > 0;
-    }
-    return mounted;
+  Future<void> _refreshVisibleProfile() async {
+    final owner = _onlineOwner;
+    final generation = _onlineProfileGeneration;
+    await _warmLocalHeader();
+    if (owner == null || !_isOnlineProfileCurrent(owner, generation) ||
+        !_wasVisible) return;
+    await _refreshFromServer();
   }
 
   void _onOnlineOwnerChanged() {
-    final owner = _sb.auth.currentUser?.id;
-    if (!mounted ||
-        _cacheOnly ||
-        _boundaryInvalidated ||
-        owner == _onlineOwner) {
-      return;
-    }
+    if (!mounted || _cacheOnly || _boundaryInvalidated) return;
+    final scope = _profileScope;
+    final owner = scope?.logoutFenced == true ? null : _uid;
+    final scopeGeneration = scope?.generation;
+    if (owner == _onlineOwner && scopeGeneration == _scopeGeneration) return;
     _onlineOwner = owner;
+    _scopeGeneration = scopeGeneration;
     _onlineProfileGeneration++;
+    _headerRevision++;
+    _localHeader = null;
     _lastPollStartedAt = null;
+    _feedLoadGeneration++;
+    _feedMediaGeneration++;
+    _feedLoadInFlight = false;
+    _recordedFeedImpressions.clear();
+    _stopPolling();
     setState(() {
       _user = null;
+      _onlineAvatar = null;
+      _feed = const ProfileFeedLoadResult(intentionallyEmpty: true);
       _friendsCount = _requestsCount = _unreadTotal = 0;
       _loading = owner != null;
     });
-    if (owner != null) unawaited(_boot());
+    if (owner != null) {
+      unawaited(_warmLocalHeader());
+      if (_wasVisible) {
+        _startPolling();
+        unawaited(_refreshVisibleProfile());
+      }
+    }
   }
 
   bool _isOnlineProfileCurrent(String owner, int generation) =>
@@ -438,27 +416,93 @@ class _ProfileScreenState extends State<ProfileScreen>
       !_cacheOnly &&
       !_boundaryInvalidated &&
       generation == _onlineProfileGeneration &&
-      _sb.auth.currentUser?.id == owner;
+      _profileScope?.logoutFenced != true &&
+      _profileScope?.generation == _scopeGeneration &&
+      _uid == owner;
+
+  HomeSnapshotCache? _profileSnapshots(AuthSessionScope? scope) {
+    if (scope == null) return null;
+    return HomeSnapshotCache(
+      project: SupabaseConfig.url,
+      authScope: scope,
+      currentUserId: () => scope.capture()?.userId,
+      sessionGeneration: () => scope.generation,
+      sessionIdentity: scope.capture,
+    );
+  }
+
+  String _avatarUrl(Map<String, dynamic>? profile) {
+    final url = profile?['avatar_url'];
+    return url is String ? url.trim() : '';
+  }
+
+  Future<bool> _prepareAvatar(ImageProvider provider,
+      bool Function() current,
+      {Duration budget = const Duration(milliseconds: 850)}) async {
+    if (!current()) return false;
+    var decoded = true;
+    await precacheImage(provider, context, onError: (_, __) => decoded = false)
+        .timeout(budget, onTimeout: () {
+      decoded = false;
+    });
+    return decoded && current();
+  }
+
+  Future<Uint8List?> _readySavedAvatar(String owner, String url,
+      bool Function() current) async {
+    if (url.isEmpty || !current()) return null;
+    final bytes = await readSavedProfileAvatar(owner, url, isCurrent: current)
+        .timeout(const Duration(milliseconds: 850), onTimeout: () => null);
+    if (bytes == null || !current()) return null;
+    return await _prepareAvatar(MemoryImage(bytes), current) ? bytes : null;
+  }
 
   Future<void> _loadLocal() async {
-    final owner = _sb.auth.currentUser?.id;
+    final owner = _onlineOwner;
     if (owner == null) return;
     final generation = _onlineProfileGeneration;
+    final revision = ++_headerRevision;
+    final scope = _profileScope;
+    bool current() => _isOnlineProfileCurrent(owner, generation) &&
+        revision == _headerRevision;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final stored = prefs.getString('user');
-      if (stored == null || stored.isEmpty) return;
-      final candidate = jsonDecode(stored) as Map<String, dynamic>;
-      if (_isOnlineProfileCurrent(owner, generation) &&
-          candidate['id'] == owner) {
-        setState(() => _user = candidate);
-      }
-    } catch (_) {}
+      if (scope != null) await scope.ready;
+      if (!current() || (scope != null && scope.capture()?.userId != owner)) return;
+      final cached = await LegacyUserCache.read(
+          currentSession: () => _sb.auth.currentSession);
+      if (!current()) return;
+      final saved = cached == null
+          ? await _profileSnapshots(scope)
+              ?.read(owner, HomeSnapshotSection.profile)
+              .timeout(const Duration(milliseconds: 850), onTimeout: () => null)
+          : null;
+      final candidate = cached ?? saved?.items.singleOrNull;
+      if (!current() || candidate?['id'] != owner || candidate == null) return;
+      final url = _avatarUrl(candidate);
+      final provider = _user?['id'] == owner && _avatarUrl(_user) == url &&
+              _onlineAvatar != null
+          ? _onlineAvatar
+          : switch (await _readySavedAvatar(owner, url, current)) {
+              final bytes? => MemoryImage(bytes),
+              null => null,
+            };
+      if (!current()) return;
+      setState(() {
+        _user = candidate;
+        _onlineAvatar = provider;
+        _loading = false;
+      });
+    } catch (_) {
+      // A malformed or unavailable local profile must not break navigation.
+    } finally {
+      if (current() && _loading) setState(() => _loading = false);
+    }
   }
 
   // ===== session keep-alive (без realtime) =====
   Future<void> _ensureSession() async {
-    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
+    final owner = _onlineOwner;
+    if (owner == null || !_isOnlineProfileCurrent(owner, _onlineProfileGeneration)) return;
     try {
       await AuthSession.ensureFreshSession(_sb);
     } catch (e) {
@@ -468,7 +512,8 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ===== polling =====
   void _startPolling() {
-    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
+    final owner = _onlineOwner;
+    if (owner == null || !_isOnlineProfileCurrent(owner, _onlineProfileGeneration)) return;
     if (_pollTimer != null) return; // уже запущен
     _pollTimer = Timer.periodic(_pollEvery, (_) {
       debugPrint('${_ts()} [Profile] tick');
@@ -483,7 +528,9 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _pollOnce() async {
-    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
+    final id = _onlineOwner;
+    final generation = _onlineProfileGeneration;
+    if (id == null || !_isOnlineProfileCurrent(id, generation)) return;
     final now = DateTime.now();
     final lastStartedAt = _lastPollStartedAt;
     if (lastStartedAt != null &&
@@ -499,13 +546,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     debugPrint('${_ts()} [Profile] pollOnce begin');
     try {
       // не обновляем сессию на каждом тике — это медленно
-
-      final id = _uid;
-      final generation = _onlineProfileGeneration;
-      if (!mounted || id == null || id.isEmpty) {
-        _applyZeros();
-        return;
-      }
 
       // параллельно тянем счётчики друзей/заявок и суммарные непрочитанные
       final friendsAndReqF = _fetchFriendsAndRequests(id);
@@ -540,14 +580,6 @@ class _ProfileScreenState extends State<ProfileScreen>
         _pollOnce();
       }
     }
-  }
-
-  void _applyZeros() {
-    setState(() {
-      _friendsCount = 0;
-      _requestsCount = 0;
-      _unreadTotal = 0;
-    });
   }
 
   // безопасное преобразование значений из RPC к int
@@ -620,34 +652,72 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   // ===== ручной refresh =====
   Future<void> _refreshHeader() async {
-    final id = _sb.auth.currentUser?.id;
+    final id = _onlineOwner;
     if (id == null) return;
     final generation = _onlineProfileGeneration;
-    bool current() => _isOnlineProfileCurrent(id, generation);
+    final revision = ++_headerRevision;
+    final scope = _profileScope;
+    final owner = scope?.capture();
+    bool current() => _isOnlineProfileCurrent(id, generation) &&
+        revision == _headerRevision &&
+        (scope == null || (owner != null && scope.isCurrent(owner)));
     if (!current()) return;
+    final snapshots = _profileSnapshots(scope);
+    final snapshotOwner = snapshots?.captureScope(id);
     final fresh = await _sb
         .from('users')
         .select(
             'id, login, name, surname, university, group_name, avatar_url, status')
         .eq('id', id)
-        .maybeSingle();
+        .maybeSingle()
+        .timeout(const Duration(seconds: 10));
     if (!current() || fresh == null || fresh['id'] != id) return;
+    final url = _avatarUrl(fresh);
+    final ImageProvider? existing = _user?['id'] == id && _avatarUrl(_user) == url
+        ? _onlineAvatar
+        : null;
+    final next = existing ?? profileAvatarImage(id, url);
+    final preparation = existing != null || next == null
+        ? null
+        : _prepareAvatar(next, current, budget: const Duration(seconds: 8));
+    final ready = await preparation?.then<bool?>((ready) => ready).timeout(
+        const Duration(milliseconds: 850), onTimeout: () => null);
+    if (!current()) return;
+    setState(() {
+      _user = fresh;
+      _onlineAvatar = existing ?? (ready == true ? next : null);
+      _loading = false;
+    });
+    if (ready == null && preparation != null) {
+      unawaited(preparation.then((decoded) {
+        if (decoded && current() && _avatarUrl(_user) == url) {
+          setState(() => _onlineAvatar = next);
+        }
+      }));
+    }
+    if (snapshots != null && snapshotOwner != null) {
+      unawaited(snapshots.write(
+          scope: snapshotOwner,
+          section: HomeSnapshotSection.profile,
+          items: [fresh],
+          savedAt: DateTime.now()).catchError((Object _) => false));
+    }
     final prefs = await SharedPreferences.getInstance();
     if (!current()) return;
-    setState(() => _user = fresh);
     await prefs.setString('user', jsonEncode(fresh));
   }
 
   Future<void> _refreshFromServer() async {
-    if (_cacheOnly || _boundaryInvalidated || !mounted) return;
+    final owner = _onlineOwner;
+    final generation = _onlineProfileGeneration;
+    bool current() => owner != null && _isOnlineProfileCurrent(owner, generation);
+    if (!current()) return;
+    await _warmLocalHeader();
+    if (!current()) return;
     try {
       await _ensureSession();
-      if (!mounted || _cacheOnly || _boundaryInvalidated) return;
-
-      await _refreshHeader();
-
-      await _pollOnce(); // подтянуть бейджи сразу
-      await _loadFeed();
+      if (!current()) return;
+      await Future.wait([_refreshHeader(), _pollOnce(), _loadFeed()]);
     } catch (e) {
       debugPrint('[Profile] refreshFromServer error: $e');
     }
@@ -684,6 +754,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     _cachedProfileGeneration++;
     _user = null;
     _cachedAvatar = null;
+    _onlineAvatar = null;
     _loading = false;
     _cachedUnavailable = true;
   }
@@ -700,7 +771,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   void _onCachedProfileRefresh() {
-    if (mounted && _user == null) unawaited(_loadCachedProfile());
+    if (mounted) unawaited(_loadCachedProfile());
   }
 
   Future<void> _loadCachedProfile() async {
@@ -740,6 +811,12 @@ class _ProfileScreenState extends State<ProfileScreen>
         });
         return;
       }
+      final url = profile.avatarUrl;
+      final avatar = _user?['id'] == profile.id && _avatarUrl(_user) == url &&
+              _cachedAvatar != null
+          ? _cachedAvatar
+          : await _readySavedAvatar(profile.id, url, current);
+      if (!current()) return;
       setState(() {
         _user = {
           'id': profile.id,
@@ -748,13 +825,12 @@ class _ProfileScreenState extends State<ProfileScreen>
           'group_name': profile.groupName,
           'university': profile.university,
           'status': profile.status,
+          'avatar_url': url,
         };
+        _cachedAvatar = avatar;
         _loading = false;
         _cachedUnavailable = false;
       });
-      final avatar = await readSavedProfileAvatar(profile.id, profile.avatarUrl,
-          isCurrent: current);
-      if (avatar != null && current()) setState(() => _cachedAvatar = avatar);
     } catch (_) {
       if (current() && _user == null) {
         setState(() {
@@ -890,22 +966,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   Widget build(BuildContext context) {
     if (_cacheOnly || _boundaryInvalidated) return _buildCachedProfile(context);
-    // Жёсткая заслонка видимости: включаем/выключаем опрос в зависимости от видимости
-    final nowVisible = _isActuallyVisible();
-    if (nowVisible != _wasVisible) {
-      _wasVisible = nowVisible;
-      if (nowVisible) {
-        debugPrint('${_ts()} [Profile] visible(true) -> start polling');
-        _startPolling();
-        // ignore: discarded_futures
-        _pollOnce();
-      } else {
-        debugPrint('${_ts()} [Profile] visible(false) -> stop polling');
-        _stopPolling();
-      }
-    }
-    debugPrint(
-        '${_ts()} [Profile] build ui -> friends=$_friendsCount req=$_requestsCount unread=$_unreadTotal loading=$_loading');
     if (_loading) {
       return Scaffold(
         appBar: AppBar(),
@@ -913,13 +973,13 @@ class _ProfileScreenState extends State<ProfileScreen>
       );
     }
 
-    final u = _user?['id'] == _sb.auth.currentUser?.id ? _user : null;
+    final u = _profileScope?.logoutFenced != true &&
+            _user?['id'] == _uid ? _user : null;
     final first = (u?['name'] ?? '') as String;
     final last = (u?['surname'] ?? '') as String;
     final uni = (u?['university'] ?? '') as String;
     final group = (u?['group_name'] ?? '') as String;
     final status = (u?['status'] ?? '') as String;
-    final avatar = (u?['avatar_url'] as String?)?.trim();
     final fullName = [first, last].where((s) => s.isNotEmpty).join(' ').trim();
 
     // Поднять шапку профиля ~28px: аватар слегка заходит в центр AppBar.
@@ -939,10 +999,14 @@ class _ProfileScreenState extends State<ProfileScreen>
           tooltip: 'Редактировать',
           icon: const Icon(Icons.tune),
           onPressed: () async {
-            await context.push('/edit-profile');
-            await _loadLocal();
-            await _ensureSession();
-            await _pollOnce(); // форс-опрос после возвращения
+            _editingProfile = true;
+            try {
+              await context.push('/edit-profile');
+              if (mounted) await _loadLocal();
+            } finally {
+              _editingProfile = false;
+              if (mounted) _onActiveChanged();
+            }
           },
         ),
         actions: [
@@ -972,11 +1036,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             groupLabel: group,
             universityLabel: uni.isEmpty ? null : uni,
             statusLabel: status.isEmpty ? null : status,
-            avatarImage: profileAvatarImage(
-                u?['id'] == _sb.auth.currentUser?.id
-                    ? _sb.auth.currentUser?.id
-                    : null,
-                avatar),
+            avatarImage: u == null ? null : _onlineAvatar,
             messagesBadge: _unreadTotal,
             friendsBadge: _requestsCount,
             feedCards: _feed.hideFeed

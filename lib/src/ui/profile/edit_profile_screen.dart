@@ -13,6 +13,7 @@ import 'package:student_platform/src/core/legacy_user_cache.dart';
 import '../../themes/theme_service.dart';
 import 'theme_mode_picker.dart';
 import 'cache_diagnostics_screen.dart';
+import 'profile_avatar_image.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -89,19 +90,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   /// Загрузка в `<uid>/<fileName>.jpg`. Это критично для RLS.
   Future<void> _pickAvatar() async {
-    final picker = ImagePicker();
-    final picked =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
-    if (picked == null || _user == null) return;
+    final session = _sb.auth.currentSession;
+    if (_saving || session == null || _user?['id'] != session.user.id) return;
+    final scope = AuthSessionScopeHost.maybeRead(context);
+    final operation = scope?.capture();
+    if (scope != null && operation == null) return;
+    final id = session.user.id;
+    bool current() => mounted && _sb.auth.currentUser?.id == id &&
+        (operation != null
+            ? scope!.isCurrent(operation)
+            : _sb.auth.currentSession?.accessToken == session.accessToken);
 
-    setState(() => _avatarPath = picked.path);
-
+    setState(() => _saving = true);
     try {
-      final id = _user!['id'] as String; // auth.uid()
-      final bytes = await File(picked.path).readAsBytes();
-      final fileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final path = '$id/$fileName'; // <— ВАЖНО: папка пользователя
+      final picked = await ImagePicker()
+          .pickImage(source: ImageSource.gallery, imageQuality: 85);
+      if (picked == null || !current()) return;
+      setState(() => _avatarPath = picked.path);
 
+      final bytes = await File(picked.path).readAsBytes();
+      if (!current()) return;
+      final fileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final path = '$id/$fileName';
       await _sb.storage.from('avatars').uploadBinary(
             path,
             bytes,
@@ -110,27 +120,42 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               contentType: 'image/jpeg',
             ),
           );
-
+      if (!current()) return;
       final publicUrl = _sb.storage.from('avatars').getPublicUrl(path);
+      await _sb.from('users').update({'avatar_url': publicUrl})
+          .eq('id', id).select('id').single();
+      if (!current()) return;
 
-      await _sb.from('users').update({'avatar_url': publicUrl}).eq('id', id);
-
-      final prefs = await SharedPreferences.getInstance();
-      final u = Map<String, dynamic>.from(_user!);
-      u['avatar_url'] = publicUrl;
-      _user = u;
-      _avatarUrl = publicUrl;
-      await prefs.setString('user', jsonEncode(u));
-
-      if (!mounted) return;
+      // A cache failure cannot undo an avatar that the server already saved.
+      try {
+        await saveUploadedProfileAvatar(id, publicUrl, bytes, isCurrent: current);
+        final prefs = await SharedPreferences.getInstance();
+        final cached = await LegacyUserCache.read(
+            currentSession: () => _sb.auth.currentSession,
+            preferences: () async => prefs);
+        if (current()) {
+          final next = {...(cached ?? _user!), 'avatar_url': publicUrl};
+          await prefs.setString('user', jsonEncode(next));
+        }
+      } catch (_) {
+        // The next online profile refresh can recover the new photo.
+      }
+      if (!current()) return;
+      setState(() {
+        _user = {...?_user, 'avatar_url': publicUrl};
+        _avatarUrl = publicUrl;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Аватар обновлён')),
       );
-    } catch (e) {
-      if (!mounted) return;
+    } catch (_) {
+      if (!current()) return;
+      setState(() => _avatarPath = null);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка загрузки аватара: $e')),
+        const SnackBar(content: Text('Не удалось обновить аватар')),
       );
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 

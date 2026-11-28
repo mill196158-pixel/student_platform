@@ -169,9 +169,11 @@ class _NavigationScreenState extends State<NavigationScreen> {
                               child: ScheduleScreen(
                                   cachedReader: widget.cachedReader,
                                   subscribeRealtime: !_cacheOnly))),
-                      VisitedTab(
-                        active: _currentIndex == 4,
-                        builder: (_) => _KeepAlive(
+                      // Warm the local header while Home is visible. The
+                      // profile starts network work only when selected.
+                      TickerMode(
+                        enabled: _currentIndex == 4,
+                        child: _KeepAlive(
                           storageKey: 'tab_profile',
                           child: _cacheOnly
                               ? _cachedTab(context, widget.cachedProfile)
