@@ -911,6 +911,13 @@ publication's presentation and cover together. The temporary image index
 continues to enforce suppression, including after a file has been evicted.
 The reader reuses the verified copy under the same checks.
 
+The July welcome publication uses a fixed carousel slot while its authorized
+cover is being fetched or decoded. The card and tap target become available
+with the actual image frame. The story reader includes that page only after
+preparing its authorized cover for the reader viewport. This leaves the lower
+Home sections available while media loads and preserves the ordinary fallback
+for other publications.
+
 Profile settings show the size of the replaceable image cache when measured
 and offer one clear action. This action preserves conversations, drafts,
 profile data and downloaded or explicitly saved offline files. Inventory

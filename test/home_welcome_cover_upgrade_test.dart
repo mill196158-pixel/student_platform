@@ -19,6 +19,7 @@ import 'package:student_platform/src/config/supabase_config.dart';
 import 'package:student_platform/src/core/auth_session_scope.dart';
 import 'package:student_platform/src/core/auth_session_scope_host.dart';
 import 'package:student_platform/src/core/online_side_effect_barrier.dart';
+import 'package:student_platform/src/core/optional_image_cache_budget.dart';
 import 'package:student_platform/src/core/session_capabilities.dart';
 import 'package:student_platform/src/ui/home/cached_home_schedule_reader.dart';
 import 'package:student_platform/src/ui/home/home_content_coordinator.dart';
@@ -36,8 +37,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 const _owner = 'july-welcome-upgrade-fixture';
 const _project = SupabaseConfig.url;
 const _promoTitle = 'Сохранённое объявление';
+const _otherTitle = 'Соседняя текстовая новость';
 const _coverHash =
     'd65fdaa33f8f7ea1df3e7cce10c3f9e25047e036a0b3f475fd48af94aef0b71a';
+const _fixtureDownload = '/storage/v1/object/sign/news-media/welcome.jpg';
 const _article = <String, dynamic>{
   'id': '9658bbcf-7fc8-48cc-ae1f-21b1a0ad1523',
   'title': 'Новое приложение',
@@ -61,6 +64,15 @@ final _oldArticle = <String, dynamic>{
       'news/11c2995c-a5c0-40d3-87e2-422fa479543a/34d8b496-cb08-4cdb-9bb9-16604f9dbada.jpg',
   'updated_at': '2026-07-22T12:16:47.478522Z',
   'version_number': 4,
+};
+const _otherArticle = <String, dynamic>{
+  'id': '7d564504-90cc-4d9b-b6ab-24a5960693a5',
+  'title': _otherTitle,
+  'body': 'Публикация без обложки',
+  'variant': 'gradientText',
+  'sort_order': 1,
+  'published_at': '2026-07-21T11:15:00Z',
+  'created_at': '2026-07-21T11:10:00Z',
 };
 
 String _session() {
@@ -195,11 +207,13 @@ void main() {
   }
   sqfliteFfiInit();
 
-  for (final (mode, offline, evicted, oldMetadata) in [
-    ('slow-network', false, false, false),
-    ('offline', true, false, false),
-    ('evicted-temp-file', false, true, false),
-    ('older-metadata', false, false, true),
+  for (final (mode, offline, evicted, oldMetadata, withoutCopies) in [
+    ('slow-network', false, false, false, false),
+    ('offline', true, false, false, false),
+    ('evicted-temp-file', false, true, false, false),
+    ('older-metadata', false, false, true, false),
+    ('without-photo-copies', false, false, false, true),
+    ('offline-without-photo-copies', true, false, false, true),
   ]) {
     testWidgets('July welcome first frames after upgrade, $mode',
         (tester) async {
@@ -213,14 +227,38 @@ void main() {
       PaintingBinding.instance.imageCache.clearLiveImages();
 
       SharedPreferences.setMockInitialValues({
-        '${PublishedNewsCache.keyPrefix}__$_owner':
-            jsonEncode([oldMetadata ? _oldArticle : _article]),
+        '${PublishedNewsCache.keyPrefix}__$_owner': jsonEncode([
+          oldMetadata ? _oldArticle : _article,
+          if (withoutCopies && !offline) _otherArticle,
+        ]),
       });
       final transportGate = Completer<void>();
+      final mediaGate = Completer<void>();
+      final waitingForMedia = Completer<void>();
       final authEvents = StreamController<AuthState>.broadcast(sync: true);
       final paths = <String>[];
+      var serveWelcome = withoutCopies && !offline;
+      late Uint8List photo;
       final mock = MockClient((request) async {
-        paths.add(request.url.path);
+        final path = request.url.path;
+        paths.add(path);
+        if (serveWelcome && path.endsWith('/get_my_published_news')) {
+          return http.Response(jsonEncode([_article, _otherArticle]), 200,
+              request: request, headers: {'content-type': 'application/json'});
+        }
+        if (serveWelcome && path.endsWith('/news-media')) {
+          expect(jsonDecode(request.body)['path'], _article['image_path']);
+          return http.Response(
+              jsonEncode({'signedUrl': '$_project$_fixtureDownload'}), 200,
+              request: request, headers: {'content-type': 'application/json'});
+        }
+        if (serveWelcome && path == _fixtureDownload) {
+          expect(request.method, 'GET');
+          if (!waitingForMedia.isCompleted) waitingForMedia.complete();
+          await mediaGate.future;
+          return http.Response.bytes(photo, 200,
+              request: request, headers: {'content-type': 'image/jpeg'});
+        }
         await transportGate.future;
         return http.Response('Fixture transport unavailable', 503,
             request: request);
@@ -238,11 +276,13 @@ void main() {
       late HomeContentCoordinator coordinator;
       late OnlineSideEffectBarrier barrier;
       late HomeDashboardService dashboard;
+      late HomeDashboardService Function() createDashboard;
+      late Future<bool> Function() persistedPhoto;
       await tester.runAsync(() async {
         final photoPath =
             Platform.environment['STUDENT_WELCOME_COVER_FIXTURE'] ??
                 'test/fixtures/july_welcome_cover.jpg';
-        final photo = await File(photoPath).readAsBytes();
+        photo = await File(photoPath).readAsBytes();
         expect(sha256.convert(photo).toString(), _coverHash);
         await Supabase.initialize(
             url: _project,
@@ -316,7 +356,7 @@ void main() {
           'promo-cover': await _promoBytes()
         });
         for (final (section, snapshot) in [
-          ('news', savedNews),
+          if (!withoutCopies) ('news', savedNews),
           ('promo', savedPromo)
         ]) {
           final ticket = await store.begin(section,
@@ -327,8 +367,11 @@ void main() {
         final optionalRoot = Directory('${root.path}/optional-blobs');
         final optionalImages = NewsSqliteImageStore.forCollectionTest(
             database: optionalDb, root: optionalRoot);
+        final budget = OptionalImageCacheBudget(roots: () async => [root]);
+        if (withoutCopies && !offline) await budget.refreshForTesting();
         final publicImages = PublicNewsImageCache(
             openStore: () async => optionalImages,
+            budget: budget,
             legacy: NewsImageDiskCache(
                 rootOverride: () => Directory('${root.path}/legacy')));
         // Installation preserves the previous verified account snapshot, while
@@ -350,7 +393,16 @@ void main() {
             evicted ? NewsImageReadState.unknown : NewsImageReadState.miss);
         coordinator = HomeContentCoordinator(
             store: store, scope: scope, httpClient: mock);
-        dashboard = HomeDashboardService(
+        persistedPhoto = () async {
+          final durable = await coordinator.readOnline('news', barrier);
+          final optional = await publicImages.read(coverKey);
+          return durable?.images.values.any((bytes) =>
+                      sha256.convert(bytes).toString() == _coverHash) ==
+                  true &&
+              optional.state == NewsImageReadState.hit &&
+              sha256.convert(optional.bytes!).toString() == _coverHash;
+        };
+        createDashboard = () => HomeDashboardService(
             client: client,
             sessionScope: scope,
             projectSnapshotCache: homeCache,
@@ -358,6 +410,7 @@ void main() {
             readVerifiedNews:
                 offline ? null : () => coordinator.readOnline('news', barrier),
             httpClient: mock);
+        dashboard = createDashboard();
       });
 
       final reader = offline
@@ -368,55 +421,112 @@ void main() {
           : null;
       final active = ValueNotifier<bool>(true);
       final boundary = GlobalKey();
-      Future<void> firstFrame(Finder finder) async {
-        for (var frame = 0; finder.evaluate().isEmpty && frame < 200; frame++) {
+      Future<void> waitFor(bool Function() ready) async {
+        for (var frame = 0; !ready() && frame < 200; frame++) {
           await tester.runAsync(
               () => Future<void>.delayed(const Duration(milliseconds: 5)));
           await tester.pump();
         }
+      }
+
+      Future<void> firstFrame(Finder finder) async {
+        await waitFor(() => finder.evaluate().isNotEmpty);
         expect(finder, findsOneWidget);
       }
 
+      Widget app({bool showHome = true}) => RepaintBoundary(
+            key: boundary,
+            child: AuthSessionScopeHost(
+                createScope: () => scope,
+                child: MaterialApp(
+                  debugShowCheckedModeBanner: false,
+                  theme: ProductTheme.build()
+                      .copyWith(platform: TargetPlatform.iOS),
+                  home: showHome
+                      ? ValueListenableBuilder<bool>(
+                          valueListenable: active,
+                          builder: (_, visible, home) => Scaffold(
+                            body: IndexedStack(
+                                index: visible ? 0 : 1,
+                                children: [
+                                  home!,
+                                  const Center(child: Text('Другая вкладка'))
+                                ]),
+                          ),
+                          child: HomeScreen(
+                              dashboardService: dashboard,
+                              activeListenable: active,
+                              homeContent: coordinator,
+                              cachedReader: reader,
+                              homeContentCapabilities:
+                                  offline ? capabilities : null,
+                              onlineBarrier: offline ? null : barrier),
+                        )
+                      : const SizedBox.shrink(),
+                )),
+          );
+
       try {
-        await tester.pumpWidget(RepaintBoundary(
-          key: boundary,
-          child: AuthSessionScopeHost(
-              createScope: () => scope,
-              child: MaterialApp(
-                debugShowCheckedModeBanner: false,
-                theme:
-                    ProductTheme.build().copyWith(platform: TargetPlatform.iOS),
-                home: ValueListenableBuilder<bool>(
-                  valueListenable: active,
-                  builder: (_, visible, home) => Scaffold(
-                    body: IndexedStack(index: visible ? 0 : 1, children: [
-                      home!,
-                      const Center(child: Text('Другая вкладка'))
-                    ]),
-                  ),
-                  child: HomeScreen(
-                      dashboardService: dashboard,
-                      activeListenable: active,
-                      homeContent: coordinator,
-                      cachedReader: reader,
-                      homeContentCapabilities: offline ? capabilities : null,
-                      onlineBarrier: offline ? null : barrier),
-                ),
-              )),
-        ));
+        await tester.pumpWidget(app());
 
         final home = find.byType(StudentHomeView);
-        final card = find.byType(StudentHomeNewsCard);
+        final card =
+            find.widgetWithText(StudentHomeNewsCard, 'Новое приложение');
+        final sibling = find.widgetWithText(StudentHomeNewsCard, _otherTitle);
         final sheet = find.byType(StudentNewsStorySheet);
+        Future<void> closeStory() async {
+          await tester.pumpAndSettle();
+          await tester.tap(find.byTooltip('Закрыть'));
+          await tester.pumpAndSettle();
+          expect(sheet, findsNothing);
+        }
+
         await firstFrame(home);
-        expect(card.hitTestable(), findsOneWidget);
-        final homePhoto =
-            await _photoOnRaster(tester, boundary, _decodedPhoto(tester, card));
         final promo = find.widgetWithText(StudentHomePromoCard, _promoTitle);
         final promoRaster =
             find.descendant(of: promo, matching: find.byType(RawImage));
+        final summary = find.text('Сводка дня');
+        late final Rect loadingPromoBounds, loadingSummaryBounds;
         expect(tester.widget<RawImage>(promoRaster).image, isNotNull);
         await _capture(tester, boundary, '$mode-first-home');
+        if (withoutCopies) {
+          expect(card, findsNothing,
+              reason:
+                  'Known July image card must not paint its purple fallback '
+                  'while both local photo copies are absent');
+          if (offline) {
+            expect(paths, isEmpty);
+            return;
+          }
+          expect(sibling.hitTestable(), findsOneWidget);
+          loadingPromoBounds = tester.getRect(promo);
+          loadingSummaryBounds = tester.getRect(summary);
+          await waitFor(() => waitingForMedia.isCompleted);
+          expect(waitingForMedia.isCompleted, isTrue);
+          expect(card, findsNothing);
+          expect(tester.getRect(promo), loadingPromoBounds);
+          expect(tester.getRect(summary), loadingSummaryBounds);
+          await tester.tap(sibling);
+          await firstFrame(sheet);
+          expect(
+              tester
+                  .widget<StudentNewsStorySheet>(sheet)
+                  .news
+                  .map((item) => item.title),
+              [_otherTitle],
+              reason: 'A pending welcome cover cannot be opened by swiping');
+          await closeStory();
+          expect(card, findsNothing);
+          expect(mediaGate.isCompleted, isFalse);
+          mediaGate.complete();
+          await firstFrame(card);
+          expect(tester.getRect(promo), loadingPromoBounds);
+          expect(tester.getRect(summary), loadingSummaryBounds);
+          await _capture(tester, boundary, '$mode-first-photo');
+        }
+        expect(card.hitTestable(), findsOneWidget);
+        final homePhoto =
+            await _photoOnRaster(tester, boundary, _decodedPhoto(tester, card));
 
         active.value = false;
         await tester.pump();
@@ -426,6 +536,10 @@ void main() {
         final returnedPhoto =
             await _photoOnRaster(tester, boundary, _decodedPhoto(tester, card));
         expect(tester.widget<RawImage>(promoRaster).image, isNotNull);
+        if (withoutCopies) {
+          expect(tester.getRect(promo), loadingPromoBounds);
+          expect(tester.getRect(summary), loadingSummaryBounds);
+        }
         await _capture(tester, boundary, '$mode-tab-return');
 
         await tester.tap(card);
@@ -442,6 +556,9 @@ void main() {
         }
         final storyPhoto =
             await _photoOnRaster(tester, boundary, firstStoryImage);
+        if (withoutCopies) {
+          await _capture(tester, boundary, '$mode-first-visible-story');
+        }
         await tester.pump(const Duration(milliseconds: 300));
         await _capture(tester, boundary, '$mode-opened-story');
         expect(transportGate.isCompleted, isFalse);
@@ -450,13 +567,61 @@ void main() {
             'return=$returnedPhoto story=$storyPhoto');
         expect([homePhoto, returnedPhoto, storyPhoto], [true, true, true],
             reason: 'Original July JPEG decoded on all three first frames');
-        expect(paths.where((path) => path.endsWith('/news-media')), isEmpty);
+        if (withoutCopies) {
+          var saved = false;
+          var checking = false;
+          for (var frame = 0; !saved && frame < 100; frame++) {
+            if (!checking) {
+              checking = true;
+              unawaited(persistedPhoto().then((available) {
+                saved = available;
+                checking = false;
+              }));
+            }
+            await tester.runAsync(
+                () => Future<void>.delayed(const Duration(milliseconds: 5)));
+            await tester.pump();
+          }
+          expect(saved, isTrue,
+              reason: 'The original download is persisted on both paths');
+          await closeStory();
+          await tester.tap(sibling);
+          await firstFrame(sheet);
+          final pager = tester.widget<StudentNewsStorySheet>(sheet);
+          expect(pager.news[pager.initialIndex].title, _otherTitle);
+          final welcome =
+              pager.news.singleWhere((item) => item.id == _article['id']);
+          expect(welcome.imageProvider, isNotNull);
+          expect(sha256.convert(welcome.imageBytes!).toString(), _coverHash);
+          await closeStory();
+          serveWelcome = false;
+          final requestedBeforeRestart =
+              paths.where((path) => path == _fixtureDownload).length;
+          await tester.pumpWidget(app(showHome: false));
+          dashboard.dispose();
+          PaintingBinding.instance.imageCache.clear();
+          PaintingBinding.instance.imageCache.clearLiveImages();
+          dashboard = createDashboard();
+          await tester.pumpWidget(app());
+          await firstFrame(home);
+          expect(
+              await _photoOnRaster(
+                  tester, boundary, _decodedPhoto(tester, card)),
+              isTrue);
+          expect(paths.where((path) => path == _fixtureDownload),
+              hasLength(requestedBeforeRestart));
+          expect(tester.widget<RawImage>(promoRaster).image, isNotNull);
+          await _capture(tester, boundary, '$mode-restarted-home');
+        } else {
+          expect(paths.where((path) => path.endsWith('/news-media')), isEmpty);
+        }
       } finally {
         barrier.close();
         dashboard.dispose();
         await tester.pumpWidget(const SizedBox.shrink());
         active.dispose();
         transportGate.complete();
+        if (!mediaGate.isCompleted) mediaGate.complete();
         await tester.pump();
         await tester.pump(const Duration(seconds: 20));
         for (var turn = 0; barrier.activeCount != 0 && turn < 180; turn++) {

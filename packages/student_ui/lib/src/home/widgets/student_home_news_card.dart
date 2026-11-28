@@ -3,12 +3,15 @@ import 'package:flutter/material.dart';
 import '../home_preview_models.dart';
 import 'news_image_frame.dart';
 
+const _newsCardWidth = 156.0;
+
 class StudentHomeNewsFeed extends StatelessWidget {
   static const height = 128.0;
 
   const StudentHomeNewsFeed({
     required this.news,
     required this.onNewsTap,
+    this.decodedCoverNewsIds = const {},
     this.selectedNewsId,
     this.adminHighlightColor,
     super.key,
@@ -16,6 +19,7 @@ class StudentHomeNewsFeed extends StatelessWidget {
 
   final List<StudentHomeNews> news;
   final ValueChanged<int>? onNewsTap;
+  final Set<String> decodedCoverNewsIds;
   final String? selectedNewsId;
   final Color? adminHighlightColor;
 
@@ -38,12 +42,30 @@ class StudentHomeNewsFeed extends StatelessWidget {
         separatorBuilder: (_, __) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           final item = news[index];
-          return StudentHomeNewsCard(
+          final card = StudentHomeNewsCard(
             key: ValueKey(item.id),
             item: item,
             onTap: onNewsTap == null ? null : () => onNewsTap!(index),
             isSelected: item.id == selectedNewsId,
             adminHighlightColor: adminHighlightColor,
+          );
+          if (!decodedCoverNewsIds.contains(item.id)) return card;
+          final bytes = item.imageBytes;
+          final provider = item.imageProvider ??
+              (bytes != null && bytes.isNotEmpty ? MemoryImage(bytes) : null);
+          return SizedBox(
+            key: ValueKey(item.id),
+            width: _newsCardWidth,
+            height: height,
+            child: provider == null
+                ? null
+                : Image(
+                    image: provider,
+                    excludeFromSemantics: true,
+                    frameBuilder: (_, __, frame, ___) =>
+                        frame == null ? const SizedBox.expand() : card,
+                    errorBuilder: (_, __, ___) => const SizedBox.expand(),
+                  ),
           );
         },
       ),
@@ -100,7 +122,7 @@ class _StudentHomeNewsCardState extends State<StudentHomeNewsCard> {
         borderRadius: BorderRadius.circular(26),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          width: 156,
+          width: _newsCardWidth,
           height: StudentHomeNewsFeed.height,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(

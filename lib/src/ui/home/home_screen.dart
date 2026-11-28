@@ -976,6 +976,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               data: _toPresentationData(data),
               newsLoading: _cachedContentAllowed &&
                   widget.homeContent?.isDenied('news') != true && data.newsLoading,
+              decodedCoverNewsIds: {
+                for (final item in data.news)
+                  if (_requiresDecodedNewsCover(item)) item.id,
+              },
               contentLayoutVisit: _contentLayoutVisit,
               notificationCount: _unreadNotificationCount,
               onRefresh: _refreshFromGesture,
@@ -1120,6 +1124,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _fmtActionDate(DateTime dt) {
     return DateFormat('d MMM, HH:mm', 'ru').format(dt.toLocal());
   }
+
+  bool _requiresDecodedNewsCover(HomeNewsItem item) =>
+      item.id == '9658bbcf-7fc8-48cc-ae1f-21b1a0ad1523' && item.usesImage;
 
   List<StudentHomeNews> _presentationNews(List<HomeNewsItem> news) {
     return [
@@ -1365,19 +1372,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final content = widget.homeContent;
     final contentCaps = widget.homeContentCapabilities;
     final contentPermit = _contentPermit;
-    final byId = {for (final item in news) item.id: item};
-    final presentation = _presentationNews(
-        news.map((item) => item.copyWith(clearImageBytes: true)).toList());
-    final safeIndex = initialIndex.clamp(0, presentation.length - 1);
-    final initial = news[safeIndex];
+    final initial = news[initialIndex.clamp(0, news.length - 1)];
+    final welcome = news.where(_requiresDecodedNewsCover).firstOrNull;
     final navigator = Navigator.of(context);
     final coverChanges = PublicNewsImageCache.shared.invalidations;
     final coverRevision = coverChanges.value;
+    bool articleCurrent(HomeNewsItem article) => _data?.news.any((item) =>
+        item.id == article.id &&
+        item.imageCacheKey?.path == article.imageCacheKey?.path) == true;
     bool current() =>
         mounted &&
         navigator.mounted &&
-        _data?.news.any((item) => item.id == initial.id &&
-            item.imageCacheKey?.path == initial.imageCacheKey?.path) == true &&
+        articleCurrent(initial) &&
         identical(_service, service) &&
         service.currentUserId == userId &&
         identical(widget.cachedReader, reader) &&
@@ -1402,50 +1408,79 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
-    // Only the tapped story waits for its local file and first decode. No
-    // signing or downloading is needed before the reader opens.
-    var initialPresentation = presentation;
     final trace = HomeFrameTrace();
+    Future<StudentHomeNews?> prepareCover(
+        HomeNewsItem item, Future<Uint8List?> local) async {
+      final verified = await local;
+      if (!coverCurrent() || !articleCurrent(item)) return null;
+      final selected = identical(item, initial);
+      if (selected) {
+        trace.mark('story_cover_read',
+            counts: {'files': verified?.isNotEmpty == true ? 1 : 0});
+      }
+      if (verified == null || verified.isEmpty) return null;
+      final bytes = listEquals(item.imageBytes, verified)
+          ? item.imageBytes!
+          : verified;
+      final viewport = MediaQuery.of(context);
+      final width = (viewport.size.width * viewport.devicePixelRatio)
+          .ceil().clamp(288, 1440).toInt();
+      final provider = ResizeImage.resizeIfNeeded(width, null, MemoryImage(bytes));
+      var decoded = true;
+      await precacheImage(provider, context, onError: (_, __) => decoded = false)
+          .timeout(const Duration(milliseconds: 600), onTimeout: () {
+        decoded = false;
+      });
+      final ready = decoded && coverCurrent() && articleCurrent(item);
+      if (selected) trace.mark('story_cover_decoded', counts: {'covers': ready ? 1 : 0});
+      return ready ? _presentationNews([item.copyWith(clearImageBytes: true)])
+          .single.copyWith(imageBytes: bytes, imageProvider: provider) : null;
+    }
+
+    // Only consult local media before opening. Include the welcome page in
+    // the swipe sequence only when its authorized cover is already decoded.
     _openingNewsStory = true;
     late final Future<Uint8List?> initialLocal;
+    StudentHomeNews? readyInitial;
+    StudentHomeNews? readyWelcome;
     try {
       initialLocal = localCover(initial);
-      final verified = await initialLocal;
-      if (!current() || widget.activeListenable?.value == false) return;
-      trace.mark('story_cover_read',
-          counts: {'files': verified?.isNotEmpty == true ? 1 : 0});
-      if (verified != null && verified.isNotEmpty && coverCurrent()) {
-        final bytes = listEquals(initial.imageBytes, verified)
-            ? initial.imageBytes!
-            : verified;
-        final viewport = MediaQuery.of(context);
-        final readerWidth = (viewport.size.width * viewport.devicePixelRatio)
-            .ceil().clamp(288, 1440).toInt();
-        final provider = ResizeImage.resizeIfNeeded(
-            readerWidth, null, MemoryImage(bytes));
-        var decoded = true;
-        await precacheImage(provider, context, onError: (_, __) => decoded = false)
-            .timeout(const Duration(milliseconds: 600), onTimeout: () {
-          decoded = false;
-        });
-        if (!current() || widget.activeListenable?.value == false) return;
-        final prepared = decoded && coverCurrent();
-        if (prepared) {
-          final ready = presentation[safeIndex]
-              .copyWith(imageBytes: bytes, imageProvider: provider);
-          initialPresentation = List.of(presentation)..[safeIndex] = ready;
-        }
-        trace.mark('story_cover_decoded', counts: {'covers': prepared ? 1 : 0});
-      }
+      final opening = prepareCover(initial, initialLocal);
+      final extraWelcome = welcome != null && !identical(welcome, initial) &&
+              welcome.imageBytes != null
+          ? prepareCover(welcome, localCover(welcome))
+          : null;
+      readyInitial = await opening;
+      readyWelcome = identical(welcome, initial) ? readyInitial : await extraWelcome;
     } finally {
       _openingNewsStory = false;
     }
+    if (!current() || widget.activeListenable?.value == false) return;
+    final includedWelcome = welcome != null && readyWelcome != null &&
+        coverCurrent() && articleCurrent(welcome) ? welcome : null;
+    if (_requiresDecodedNewsCover(initial) && includedWelcome == null) return;
+    bool routeCurrent() => current() && (includedWelcome == null ||
+        (coverCurrent() && articleCurrent(includedWelcome)));
+    final shown = [
+      for (final item in news)
+        if (!_requiresDecodedNewsCover(item) || identical(item, includedWelcome)) item,
+    ];
+    final byId = {for (final item in shown) item.id: item};
+    final presentation = _presentationNews(
+        shown.map((item) => item.copyWith(clearImageBytes: true)).toList());
+    final initialPresentation = [
+      for (final item in presentation)
+        if (item.id == readyInitial?.id) readyInitial!
+        else if (item.id == readyWelcome?.id) readyWelcome!
+        else item,
+    ];
+    final safeIndex = shown.indexWhere((item) => item.id == initial.id);
 
     final active = ValueNotifier<bool>(true);
     ModalBottomSheetRoute<void>? sheetRoute;
     var tracedFirstVisible = false;
     void check() {
-      if (current()) return;
+      if (routeCurrent()) return;
       void close() {
         final target = sheetRoute;
         if (target == null || !target.isActive) return;
@@ -1463,7 +1498,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     void mark(String id, {bool closed = false}) {
-      if (!current()) return;
+      if (!routeCurrent()) return;
       if (barrier == null) {
         unawaited(service.markNewsSeen(id, closed: closed));
       } else {
@@ -1472,6 +1507,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final removeClose = barrier?.onClose(check);
+    coverChanges.addListener(check);
     scope?.addListener(check);
     reader?.accessChanges.addListener(check);
     content?.addListener(check);
@@ -1490,17 +1526,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onPageChanged: reader == null ? (id) => mark(id) : null,
               onClosed: reader == null ? (id) => mark(id, closed: true) : null,
               resolveImage: (item) async {
-                if (!coverCurrent()) return null;
+                if (!routeCurrent() || !coverCurrent()) return null;
                 final source = byId[item.id];
                 if (source == null) return null;
                 final bytes = await (source == initial ? initialLocal : localCover(source));
-                if (!coverCurrent()) return null;
+                if (!routeCurrent() || !coverCurrent()) return null;
                 if (bytes != null || reader != null) return bytes;
                 final downloaded = barrier == null
                     ? await service.resolveNewsImageBytes(source)
                     : await service.resolveGuardedStoryImage(source, barrier,
-                        current: coverCurrent);
-                return coverCurrent() ? downloaded : null;
+                        current: () => routeCurrent() && coverCurrent());
+                return routeCurrent() && coverCurrent() ? downloaded : null;
               },
             );
         final changes = <Listenable>[
@@ -1513,7 +1549,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final readerView = ListenableBuilder(
             listenable: Listenable.merge(changes),
             builder: (_, __) => active.value &&
-                    current() &&
+                    routeCurrent() &&
                     (reader == null || reader.canRead) &&
                     widget.homeContent?.isDenied('news') != true
                 ? sheet()
@@ -1524,10 +1560,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           animation: animation,
           child: readerView,
           builder: (_, child) {
-            if (!tracedFirstVisible && animation.value > 0 && current()) {
+            if (!tracedFirstVisible && animation.value > 0 && routeCurrent()) {
               tracedFirstVisible = true;
               trace.markNextRaster('story_first_visible',
-                  current: () => current() && sheetRoute?.isActive == true);
+                  current: () => routeCurrent() && sheetRoute?.isActive == true);
             }
             return child!;
           },
@@ -1535,9 +1571,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       },
     );
     unawaited(navigator.push(sheetRoute));
-    if (!current()) check();
+    if (!routeCurrent()) check();
     unawaited(sheetRoute.completed.whenComplete(() {
       removeClose?.call();
+      coverChanges.removeListener(check);
       scope?.removeListener(check);
       reader?.accessChanges.removeListener(check);
       content?.removeListener(check);

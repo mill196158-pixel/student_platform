@@ -53,6 +53,7 @@ class StudentHomeView extends StatelessWidget {
     this.onNotificationsTap,
     this.onNewsTap,
     this.newsLoading = false,
+    this.decodedCoverNewsIds = const {},
     this.onSummaryTap,
     this.onGroupActionTap,
     this.onGroupActionDelete,
@@ -84,6 +85,7 @@ class StudentHomeView extends StatelessWidget {
   /// Initial news metadata is pending for this visit. Once a feed is known,
   /// keep it visible during refreshes instead of returning to the pending strip.
   final bool newsLoading;
+  final Set<String> decodedCoverNewsIds;
 
   final VoidCallback? onSummaryTap;
   final ValueChanged<StudentHomeGroupAction>? onGroupActionTap;
@@ -157,6 +159,7 @@ class StudentHomeView extends StatelessWidget {
           : StudentHomeNewsFeed(
               news: data.news,
               onNewsTap: onNewsTap,
+              decodedCoverNewsIds: decodedCoverNewsIds,
               selectedNewsId: selectedNewsId,
               adminHighlightColor: adminNewsHighlightColor,
             ),
