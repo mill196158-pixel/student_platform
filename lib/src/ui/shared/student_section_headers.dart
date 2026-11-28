@@ -71,20 +71,76 @@ class StudentInfoHeader extends StatelessWidget {
   final IconData sectionIcon;
   final VoidCallback onSectionTap, onInfoTap;
   @override
-  Widget build(BuildContext context) => _SectionHeading(
-          title: 'База',
-          subtitle: subtitle,
-          leading: const _SectionIcon(Icons.lightbulb_outline_rounded),
-          actions: [
-            IconButton(
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final radius = BorderRadius.circular(18);
+    return Material(
+      color: colors.surfaceContainerLow,
+      child: SafeArea(
+        bottom: false,
+        minimum: const EdgeInsets.only(top: 8),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 10, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Tooltip(
+                  message: 'Выбрать раздел',
+                  child: Material(
+                    color: colors.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: radius,
+                      side: BorderSide(color: colors.outlineVariant),
+                    ),
+                    child: InkWell(
+                      borderRadius: radius,
+                      onTap: onSectionTap,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 9, 12, 9),
+                        child: Row(
+                          children: [
+                            _SectionIcon(sectionIcon),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('База', style: theme.textTheme.titleLarge),
+                                  Text(
+                                    subtitle,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Icon(Icons.expand_more_rounded,
+                                color: colors.onSurfaceVariant),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
                 tooltip: 'О разделе',
                 onPressed: onInfoTap,
-                icon: const Icon(Icons.info_outline_rounded)),
-            IconButton(
-                tooltip: 'Выбрать раздел',
-                onPressed: onSectionTap,
-                icon: Icon(sectionIcon))
-          ]);
+                icon: const Icon(Icons.info_outline_rounded),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class StudentLearningHeader extends StatelessWidget {

@@ -1178,10 +1178,8 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final headerHeight =
-        (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0);
-
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
       body: FutureBuilder<InfoPlanState>(
         future: _future,
         builder: (context, snapshot) {
@@ -1190,16 +1188,18 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(
-                height: headerHeight,
-                child: StudentInfoHeader(
-                  subtitle: _sectionSubtitle(_section),
-                  sectionIcon: _sectionIcon(_section),
-                  onSectionTap: _cacheOnly ? () => ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Этот раздел доступен при подключении к сети.')))
+              StudentInfoHeader(
+                subtitle: _sectionSubtitle(_section),
+                sectionIcon: _sectionIcon(_section),
+                onSectionTap: _cacheOnly
+                    ? () => ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'Этот раздел доступен при подключении к сети.'),
+                          ),
+                        )
                     : () => _showSectionSheet(context),
-                  onInfoTap: () => _showInfoSheet(context),
-                ),
+                onInfoTap: () => _showInfoSheet(context),
               ),
               Expanded(
                 child: _buildBody(snapshot, state),
@@ -1428,7 +1428,7 @@ class _InfoScreenState extends State<InfoScreen> with WidgetsBindingObserver {
                     icon: Icons.swap_horiz_rounded,
                     title: 'Как переключаться',
                     text:
-                        'Нажми круглую кнопку с иконкой раздела вверху экрана и выбери нужный блок.',
+                        'Нажми на название раздела вверху экрана и выбери нужный блок.',
                   ),
                 ],
               ),
@@ -1657,28 +1657,34 @@ class _SectionChoiceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+      side: BorderSide(color: selected ? cs.primary : cs.outlineVariant),
+    );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: ListTile(
-        selected: selected,
-        selectedTileColor: cs.primaryContainer.withValues(alpha: .45),
-        selectedColor: cs.onSurface,
-        iconColor: cs.onSurfaceVariant,
-        textColor: cs.onSurface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        leading: Icon(icon, color: selected ? cs.primary : cs.onSurfaceVariant),
-        title: Text(title),
-        subtitle: Text(subtitle,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: cs.onSurfaceVariant)),
-        trailing: Icon(
-            selected ? Icons.check_rounded : Icons.chevron_right_rounded,
-            color: selected ? cs.primary : cs.onSurfaceVariant),
-        onTap: onTap,
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: selected ? cs.primaryContainer.withValues(alpha: .45) : cs.surface,
+        shape: shape,
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          selected: selected,
+          selectedColor: cs.onSurface,
+          iconColor: cs.onSurfaceVariant,
+          textColor: cs.onSurface,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          shape: shape,
+          leading: Icon(icon, color: selected ? cs.primary : cs.onSurfaceVariant),
+          title: Text(title, style: theme.textTheme.titleMedium),
+          subtitle: Text(subtitle,
+              style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+          trailing: Icon(
+              selected ? Icons.check_rounded : Icons.chevron_right_rounded,
+              color: selected ? cs.primary : cs.onSurfaceVariant),
+          onTap: onTap,
+        ),
       ),
     );
   }
@@ -2557,23 +2563,33 @@ class _BaseSectionIntro extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 16),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, size: 28, color: theme.colorScheme.primary),
-        const SizedBox(width: 14),
-        Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title,
-              style: theme.textTheme.titleLarge
-                  ?.copyWith(color: theme.colorScheme.onSurface)),
-          const SizedBox(height: 6),
-          Text(subtitle,
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-        ])),
-      ]),
+      padding: const EdgeInsets.only(bottom: 16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: colors.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(icon, size: 24, color: colors.primary),
+            const SizedBox(width: 12),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(title, style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(subtitle,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: colors.onSurfaceVariant)),
+                ])),
+          ]),
+        ),
+      ),
     );
   }
 }
@@ -3175,6 +3191,7 @@ Future<_UsefulSection?> _showInfoSectionPicker(
   FocusManager.instance.primaryFocus?.unfocus();
   return showModalBottomSheet<_UsefulSection>(
     context: context,
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
     showDragHandle: true,
     isScrollControlled: true,
     constraints: const BoxConstraints(maxWidth: 600),
@@ -3441,27 +3458,23 @@ class _GuestInfoScreenState extends State<GuestInfoScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
       body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        SizedBox(
-            height:
-                (MediaQuery.paddingOf(context).top + 86.0).clamp(128.0, 150.0),
-            child: StudentInfoHeader(
-                subtitle: _section == _UsefulSection.subjects
-                    ? (widget.group == null
-                        ? 'каталог предметов'
-                        : 'предметы группы')
-                    : _sectionSubtitle(_section),
-                sectionIcon: _sectionIcon(_section),
-                onInfoTap: widget.onAccountInfo,
-                onSectionTap: () async {
-                  final selected =
-                      await _showInfoSectionPicker(context, _section);
-                  if (mounted && selected != null) {
-                    PageStorage.maybeOf(context)?.writeState(context, selected,
-                        identifier: 'guest_base_section');
-                    setState(() => _section = selected);
-                  }
-                })),
+        StudentInfoHeader(
+          subtitle: _section == _UsefulSection.subjects
+              ? (widget.group == null ? 'каталог предметов' : 'предметы группы')
+              : _sectionSubtitle(_section),
+          sectionIcon: _sectionIcon(_section),
+          onInfoTap: widget.onAccountInfo,
+          onSectionTap: () async {
+            final selected = await _showInfoSectionPicker(context, _section);
+            if (mounted && selected != null) {
+              PageStorage.maybeOf(context)?.writeState(context, selected,
+                  identifier: 'guest_base_section');
+              setState(() => _section = selected);
+            }
+          },
+        ),
         Expanded(
             child: RefreshIndicator(
                 onRefresh: () => _load(_section),
