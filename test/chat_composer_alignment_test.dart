@@ -282,7 +282,9 @@ void main() {
       }
 
       final input = find.byType(TextField);
-      final hint = find.text('Сообщение');
+      final hint = find.byKey(const ValueKey('chat-composer-visible-hint'));
+      final nativeHint =
+          find.descendant(of: input, matching: find.text('Сообщение'));
       final plus = find.ancestor(
         of: find.byIcon(Icons.add),
         matching: find.byType(InkWell),
@@ -301,11 +303,21 @@ void main() {
             tester.getRect(editor),
             tester.getRect(send),
           ];
+      double hintCenterY() {
+        final paragraph = tester.renderObject<RenderParagraph>(hint);
+        final text = paragraph.getBoxesForSelection(
+          const TextSelection(baseOffset: 0, extentOffset: 'Сообщение'.length),
+        );
+        return paragraph.localToGlobal(text.single.toRect().center).dy;
+      }
 
       await tester.pumpWidget(fixture());
       await tester.pumpAndSettle();
       await tester.runAsync(() => _capture(captureKey, '$prefix-closed'));
       final normal = row();
+      final normalHintCenter = hintCenterY();
+      expect(tester.widget<TextField>(input).decoration?.hintText, 'Сообщение');
+      expect(tester.getTopLeft(hint).dx, tester.getTopLeft(nativeHint).dx);
       final normalHint = tester.getSize(hint).width;
       await tester.tap(find.byTooltip('Прикрепить файл'));
       expect(attachments, 1);
@@ -318,15 +330,26 @@ void main() {
       await tester.pumpAndSettle();
       await tester.runAsync(() => _capture(captureKey, '$prefix-keyboard'));
       final keyboard = row();
+      final largeHintCenter = hintCenterY();
+      expect(tester.getTopLeft(hint).dx, tester.getTopLeft(nativeHint).dx);
       final largeHint = tester.getSize(hint).width;
       final largeHintParagraph = tester.renderObject<RenderParagraph>(hint);
       final largeHintTruncated = largeHintParagraph.didExceedMaxLines;
       expect(focus.hasFocus, isTrue);
 
-      await tester.enterText(
-          input, 'Первая строка\nВторая строка\nТретья строка');
+      await tester.enterText(input, 'Раз\nДва\nТри');
       await tester.pumpAndSettle();
       final multiline = row();
+      expect(hint, findsNothing);
+      final editable = tester
+          .state<EditableTextState>(find.byType(EditableText))
+          .renderEditable;
+      final firstCaret = editable
+          .getLocalRectForCaret(const TextPosition(offset: 0))
+          .shift(editable.localToGlobal(Offset.zero));
+      final lastCaret = editable
+          .getLocalRectForCaret(TextPosition(offset: controller.text.length))
+          .shift(editable.localToGlobal(Offset.zero));
       expect(find.byTooltip('Прикрепить файл').hitTestable(), findsOneWidget);
       await tester.tap(send);
       expect(sends, 1);
@@ -347,8 +370,13 @@ void main() {
         expect(controls.map((rect) => rect.height), everyElement(48));
         expect(controls.map((rect) => rect.center.dy).toSet(), hasLength(1));
       }
+      expect(normalHintCenter, closeTo(normal.first.center.dy, .5));
+      expect(largeHintCenter, closeTo(keyboard.first.center.dy, .5));
       expect(multiline[1].height, greaterThan(48));
       expect(multiline.map((rect) => rect.bottom).toSet(), hasLength(1));
+      expect(firstCaret.top, greaterThanOrEqualTo(multiline[1].top));
+      expect(lastCaret.top, greaterThan(firstCaret.top));
+      expect(lastCaret.bottom, lessThanOrEqualTo(multiline[1].bottom));
       expect(largeHint, greaterThanOrEqualTo(normalHint));
       expect(largeHintTruncated, isFalse);
     });

@@ -127,6 +127,31 @@ class _ComposerState extends State<Composer> {
     return style.copyWith(fontSize: style.fontSize! * fit);
   }
 
+  Widget _withCenteredHint(TextStyle style, TextField field) => Stack(
+        fit: StackFit.passthrough,
+        children: [
+          field,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ExcludeSemantics(
+                child: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: widget.controller,
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text(_messageHint,
+                        key: const ValueKey('chat-composer-visible-hint'),
+                        style: style,
+                        maxLines: 1),
+                  ),
+                  builder: (_, value, child) =>
+                      value.text.isEmpty ? child! : const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -293,66 +318,76 @@ class _ComposerState extends State<Composer> {
                                   ),
                                 },
                                 child: LayoutBuilder(
-                                  builder: (context, constraints) => TextField(
-                                    focusNode: widget.focusNode,
-                                    controller: widget.controller,
-                                    keyboardType: TextInputType.multiline,
-                                    textInputAction: TextInputAction.send,
-                                    minLines: 1,
-                                    maxLines: 6,
-                                    textAlignVertical: TextAlignVertical.center,
-                                    decoration: InputDecoration(
-                                      hintText: _messageHint,
-                                      hintStyle: _hintStyle(
-                                        context,
-                                        constraints.maxWidth,
-                                      ),
-                                      hintMaxLines: 1,
-                                      hintFadeDuration: Duration.zero,
-                                      constraints: const BoxConstraints(
-                                        minHeight: Composer.controlSize,
-                                      ),
-                                      filled: false,
-                                      border: InputBorder.none,
-                                      enabledBorder: InputBorder.none,
-                                      focusedBorder: InputBorder.none,
-                                      disabledBorder: InputBorder.none,
-                                      errorBorder: InputBorder.none,
-                                      focusedErrorBorder: InputBorder.none,
-                                      isCollapsed: true,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                              vertical: 4),
-                                    ),
-                                    contextMenuBuilder:
-                                        widget.onPasteFile == null
-                                            ? null
-                                            : (context, editableTextState) {
-                                                final items = editableTextState
-                                                    .contextMenuButtonItems
-                                                    .where((item) =>
-                                                        item.type !=
-                                                        ContextMenuButtonType
-                                                            .paste);
-                                                return AdaptiveTextSelectionToolbar
-                                                    .buttonItems(
-                                                  anchors: editableTextState
-                                                      .contextMenuAnchors,
-                                                  buttonItems: [
-                                                    ContextMenuButtonItem(
-                                                      label: 'Вставить',
-                                                      onPressed: () {
-                                                        ContextMenuController
-                                                            .removeAny();
-                                                        widget.onPasteFile!();
-                                                      },
-                                                    ),
-                                                    ...items,
-                                                  ],
-                                                );
-                                              },
-                                    onSubmitted: (_) => widget.onSend(),
-                                  ),
+                                  builder: (context, constraints) {
+                                    final hintStyle = _hintStyle(
+                                        context, constraints.maxWidth);
+                                    return _withCenteredHint(
+                                        hintStyle,
+                                        TextField(
+                                          focusNode: widget.focusNode,
+                                          controller: widget.controller,
+                                          keyboardType: TextInputType.multiline,
+                                          textInputAction: TextInputAction.send,
+                                          minLines: 1,
+                                          maxLines: 6,
+                                          textAlignVertical:
+                                              TextAlignVertical.center,
+                                          decoration: InputDecoration(
+                                            hintText: _messageHint,
+                                            // Keep the editable's hint for semantics
+                                            // and layout. Paint it at the row center.
+                                            hintStyle: hintStyle.copyWith(
+                                              color: Colors.transparent,
+                                            ),
+                                            hintMaxLines: 1,
+                                            hintFadeDuration: Duration.zero,
+                                            constraints: const BoxConstraints(
+                                              minHeight: Composer.controlSize,
+                                            ),
+                                            filled: false,
+                                            border: InputBorder.none,
+                                            enabledBorder: InputBorder.none,
+                                            focusedBorder: InputBorder.none,
+                                            disabledBorder: InputBorder.none,
+                                            errorBorder: InputBorder.none,
+                                            focusedErrorBorder:
+                                                InputBorder.none,
+                                            isCollapsed: true,
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                    vertical: 4),
+                                          ),
+                                          contextMenuBuilder: widget
+                                                      .onPasteFile ==
+                                                  null
+                                              ? null
+                                              : (context, editableTextState) {
+                                                  final items = editableTextState
+                                                      .contextMenuButtonItems
+                                                      .where((item) =>
+                                                          item.type !=
+                                                          ContextMenuButtonType
+                                                              .paste);
+                                                  return AdaptiveTextSelectionToolbar
+                                                      .buttonItems(
+                                                    anchors: editableTextState
+                                                        .contextMenuAnchors,
+                                                    buttonItems: [
+                                                      ContextMenuButtonItem(
+                                                        label: 'Вставить',
+                                                        onPressed: () {
+                                                          ContextMenuController
+                                                              .removeAny();
+                                                          widget.onPasteFile!();
+                                                        },
+                                                      ),
+                                                      ...items,
+                                                    ],
+                                                  );
+                                                },
+                                          onSubmitted: (_) => widget.onSend(),
+                                        ));
+                                  },
                                 ),
                               ),
                             ),
